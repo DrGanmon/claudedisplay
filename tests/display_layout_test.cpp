@@ -4,7 +4,7 @@
 
 int main() {
   using namespace DisplayLayout;
-  const TextArea areas[] = {NAME, TEMPERATURE, SESSION, WEEKLY, TRUECONF, NETWORK};
+  const TextArea areas[] = {NAME, TEMPERATURE, CLOCK, SESSION, WEEKLY, TRUECONF, NETWORK};
   // Ring-Innenkante samt Glättung beginnt bei Radius 90. Alle Sprite-Ecken
   // müssen innerhalb Radius 88 liegen, nicht nur die Schriftmittelpunkte.
   for (const TextArea &area : areas) {

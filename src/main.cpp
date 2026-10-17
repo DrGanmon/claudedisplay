@@ -44,7 +44,8 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-17.16";
+constexpr char FIRMWARE_VERSION[] = "2026-10-17.17";
+constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -419,7 +420,7 @@ void handleSaveDisplayName() {
     return;
   }
   displayDirty = true;
-  configTime(0, 0, config.ntpServer.c_str());
+  configTime(LOCAL_TIMEZONE, config.ntpServer.c_str());
   settingsResult("Display-Einstellungen gespeichert. Die Anzeige wird sofort aktualisiert.");
 }
 
@@ -974,7 +975,7 @@ void drawChangedText(const String &text, uint16_t color, const DisplayLayout::Te
 
 void drawDisplay() {
   static RingDrawState sessionRing, weeklyRing;
-  static TextDrawState name, temperature, session, weekly, network, trueConf;
+  static TextDrawState name, temperature, clock, session, weekly, network, trueConf;
   const bool fullRedraw = displayNeedsFullRedraw;
   if (fullRedraw) display.fillScreen(TFT_BLACK);
 
@@ -985,6 +986,13 @@ void drawDisplay() {
   drawChangedText(temperatureText, TFT_WHITE, DisplayLayout::TEMPERATURE, temperature, fullRedraw);
   char sessionReset[24], weeklyReset[24];
   const int64_t now = static_cast<int64_t>(time(nullptr));
+  char clockText[9] = "--:--:--";
+  if (now >= 1577836800) {
+    const time_t timestamp = static_cast<time_t>(now);
+    struct tm localTime;
+    if (localtime_r(&timestamp, &localTime)) strftime(clockText, sizeof(clockText), "%H:%M:%S", &localTime);
+  }
+  drawChangedText(clockText, TFT_WHITE, DisplayLayout::CLOCK, clock, fullRedraw);
   formatResetRemaining(sessionLimit.valid ? sessionLimit.resetEpoch : -1, now, sessionReset, sizeof(sessionReset));
   formatResetRemaining(weeklyLimit.valid ? weeklyLimit.resetEpoch : -1, now, weeklyReset, sizeof(weeklyReset));
   drawChangedText("S " + percentText(sessionLimit) + "% " + sessionReset,
@@ -1129,7 +1137,7 @@ void setup() {
   Serial.println("Display initialisiert; WLAN-Verbindung startet");
 
   connectWifi();
-  configTime(0, 0, config.ntpServer.c_str());
+  configTime(LOCAL_TIMEZONE, config.ntpServer.c_str());
   detectSensor();
   readSensor();
   handleWifiRecovery();
