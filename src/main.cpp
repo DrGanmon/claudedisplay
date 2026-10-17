@@ -18,6 +18,8 @@
 #include "reset_time.h"
 #include "trueconf.h"
 #include "display_layout.h"
+#include "wifi_recovery.h"
+#include <memory>
 #include <time.h>
 
 namespace Pins {
@@ -42,7 +44,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-17.13";
+constexpr char FIRMWARE_VERSION[] = "2026-10-17.14";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -74,6 +76,9 @@ LimitBucket sonnetLimit;
 
 TFT_eSPI display;
 ESP8266WebServer web(80);
+std::unique_ptr<WiFiManager> wifiPortal;
+WifiRecovery wifiRecovery;
+bool normalWebRunning = false;
 Adafruit_BME280 bme;
 Adafruit_BMP280 bmp;
 
@@ -597,6 +602,8 @@ void handleUpdateFinished() {
 }
 
 void setupWebServer() {
+  static bool routesRegistered = false;
+  if (!routesRegistered) {
   web.on("/", HTTP_GET, handleStatus);
   web.on("/settings", HTTP_GET, handleSettings);
   web.on("/settings", HTTP_POST, handleSaveSettings);
@@ -639,9 +646,13 @@ void setupWebServer() {
     web.send(200, "application/json", body);
   });
   web.onNotFound([]() { web.send(404, "text/plain", "Nicht gefunden"); });
+    routesRegistered = true;
+  }
   web.begin();
   MDNS.begin(HOSTNAME);
   MDNS.addService("http", "tcp", 80);
+  normalWebRunning = true;
+  webServerReadyMs = millis();
 }
 
 String cookieHeader() {
@@ -962,7 +973,8 @@ void drawDisplay() {
   drawChangedText(trueConfText, TFT_WHITE, DisplayLayout::TRUECONF, trueConf, fullRedraw);
   // Schmale Zeile vollständig innerhalb des inneren Rings.
   const String networkText = WiFi.status() == WL_CONNECTED
-      ? (config.showIp ? "IP " + WiFi.localIP().toString() : String()) : String("WLAN");
+      ? (config.showIp ? "IP " + WiFi.localIP().toString() : String())
+      : (wifiPortal ? String("AP 192.168.4.1") : String("WLAN"));
   drawChangedText(networkText, TFT_WHITE, DisplayLayout::NETWORK, network, fullRedraw);
   displayNeedsFullRedraw = false;
   displayDirty = false;
@@ -1004,12 +1016,15 @@ void handleLongTouch() {
   ESP.restart();
 }
 
-void connectWifi() {
+void connectWifi(bool trySavedWifi = true) {
   WiFi.persistent(true);
   WiFi.hostname(HOSTNAME);
-  WiFiManager manager;
+  wifiPortal.reset(new WiFiManager());
+  WiFiManager &manager = *wifiPortal;
   manager.setHostname(HOSTNAME);
-  manager.setConfigPortalTimeout(300);
+  manager.setConfigPortalTimeout(0);
+  manager.setConfigPortalBlocking(false);
+  manager.setWiFiAutoReconnect(true);
   manager.setConnectTimeout(20);
   manager.setBreakAfterConfig(false);
   manager.setAPCallback([](WiFiManager *wifiManager) {
@@ -1023,8 +1038,42 @@ void connectWifi() {
     drawDisplayName();
   });
   // Das Portal verwaltet bewusst nur WLAN. Claude-Daten werden später über /settings gepflegt.
-  if (!manager.autoConnect(SETUP_AP, SETUP_AP_PASSWORD)) ESP.restart();
-  WiFi.mode(WIFI_STA);  // Setup-AP nach erfolgreicher Anmeldung abschalten.
+  if (trySavedWifi) manager.autoConnect(SETUP_AP, SETUP_AP_PASSWORD);
+  else manager.startConfigPortal(SETUP_AP, SETUP_AP_PASSWORD);
+  displayNeedsFullRedraw = true;
+}
+
+void handleWifiRecovery() {
+  if (wifiPortal) wifiPortal->process();
+  const uint32_t now = millis();
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  const bool fallbackDue = wifiRecovery.needsPortal(connected, now);
+  if (connected) {
+    if (wifiPortal) {
+      wifiPortal->stopConfigPortal();
+      wifiPortal.reset();
+      WiFi.mode(WIFI_STA);
+      displayNeedsFullRedraw = true;
+      forceClaudeRefresh = true;
+    }
+    if (!normalWebRunning) setupWebServer();
+    return;
+  }
+  if (fallbackDue && !wifiPortal) {
+    Serial.println("WLAN seit 60 Sekunden getrennt; Setup-AP startet");
+    web.stop();
+    MDNS.end();
+    normalWebRunning = false;
+    connectWifi(false);
+  }
+  if (wifiPortal && !wifiPortal->getConfigPortalActive()) {
+    wifiPortal->startConfigPortal(SETUP_AP, SETUP_AP_PASSWORD);
+    displayNeedsFullRedraw = true;
+  }
+  if (now - lastWifiRetryMs >= Timing::WIFI_RETRY_MS && WiFi.SSID().length()) {
+    lastWifiRetryMs = now;
+    WiFi.reconnect();
+  }
 }
 
 void setup() {
@@ -1058,8 +1107,7 @@ void setup() {
   configTime(0, 0, config.ntpServer.c_str());
   detectSensor();
   readSensor();
-  setupWebServer();
-  webServerReadyMs = millis();
+  handleWifiRecovery();
   forceClaudeRefresh = true;
   forceTrueConfRefresh = false;
   if (config.trueConf.enabled) trueConfResult.state = "Erster Abruf 60 Sekunden nach Webserver-Start";
@@ -1068,19 +1116,17 @@ void setup() {
 
 void loop() {
   const uint32_t now = millis();
-  web.handleClient();
-  MDNS.update();
+  handleWifiRecovery();
+  if (normalWebRunning) {
+    web.handleClient();
+    if (WiFi.status() == WL_CONNECTED) MDNS.update();
+  }
   handleTouch();
   handleLongTouch();
 
   if (now - lastSensorMs >= Timing::SENSOR_MS) {
     lastSensorMs = now;
     readSensor();
-  }
-
-  if (WiFi.status() != WL_CONNECTED && now - lastWifiRetryMs >= Timing::WIFI_RETRY_MS) {
-    lastWifiRetryMs = now;
-    WiFi.reconnect();
   }
 
   const uint32_t configuredIntervalMs = config.intervalSec * static_cast<uint32_t>(1000);

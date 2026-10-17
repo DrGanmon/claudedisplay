@@ -24,6 +24,7 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 - Status-API im JSON-Format
 - passwortgeschütztes Firmwareupdate per Datei-Upload im Browser
 - automatische WLAN-Wiederverbindung
+- nach 60 Sekunden WLAN-Ausfall automatisch wieder Setup-AP und Captive Portal öffnen, ohne Zugangsdaten zu löschen
 - Unterstützung von BMP280 und BME280 an den Adressen `0x76` und `0x77`
 - Betrieb ohne Klimasensor oder Touchsensor; das Display ist zwingend erforderlich
 - kompakte Anzeige ohne vollständigen Bildpuffer für den begrenzten ESP8266-RAM
@@ -120,7 +121,7 @@ Falls ein TTP223 angeschlossen ist, startet eine kurze Berührung eine sofortige
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.13`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.14`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Version `2026-10-17.11` behebt vorzeitig abgeschnittene Einstellungsseiten bei leeren Konfigurationswerten. Leere Servernamen, Organisations-IDs oder andere optionale Textfelder dürfen keinen leeren HTTP-Chunk auslösen, da dieser die Antwort beendet. Der TrueConf-Abschnitt zeigt deshalb auch vor der ersten Konfiguration alle Felder und beide Buttons vollständig an.
 
@@ -187,6 +188,12 @@ Die Statusseite zeigt:
 - freien Heap-Speicher
 
 Das Captive Portal läuft nur solange keine funktionierende WLAN-Konfiguration vorhanden ist. Nach erfolgreicher Verbindung wird ausdrücklich auf reinen Clientbetrieb (`WIFI_STA`) umgeschaltet. Der normale Webserver bleibt anschließend dauerhaft im Heimnetz aktiv.
+
+### Automatischer AP-Rückfall bei WLAN-Ausfall
+
+Ist das gespeicherte WLAN beim Start nicht erreichbar, öffnet das Gerät nach dem Verbindungsversuch das Setup-WLAN `ClaudeDisplay-Setup`. Fällt eine bestehende WLAN-Verbindung später aus, versucht es weiterhin alle 15 Sekunden eine Wiederverbindung und öffnet nach 60 Sekunden ununterbrochener Trennung ebenfalls das Setup-WLAN. Das Passwort lautet `claude-display`; das Portal ist unter `http://192.168.4.1/` erreichbar. Auf dem Display erscheint `AP 192.168.4.1`.
+
+Das Portal läuft im Hintergrund ohne automatischen Zeitablauf. Die bisherigen WLAN-Zugangsdaten sowie Claude-, TrueConf- und Display-Einstellungen bleiben erhalten. Man kann im Portal ein anderes WLAN auswählen oder warten, bis das bisherige wieder erreichbar ist. Sobald eine Verbindung besteht, beendet die Firmware das Portal, schaltet den AP ab und startet das normale Webinterface erneut. Portal und normaler Webserver verwenden Port 80 nacheinander; die normale Status- und Einstellungsseite ist während des Setup-Portals nicht verfügbar. Sensoren und Display werden während des Portals weiter bedient.
 
 ### Firmware über die Webseite aktualisieren
 
