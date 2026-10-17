@@ -33,6 +33,7 @@ constexpr uint32_t CLAUDE_MIN_MS = 60000;
 constexpr uint32_t WIFI_RETRY_MS = 15000;
 constexpr uint32_t TOUCH_DEBOUNCE_MS = 35;
 constexpr uint32_t TOUCH_RESET_MS = 5000;
+constexpr uint32_t TRUECONF_STARTUP_GRACE_MS = 60000;
 }  // namespace Timing
 
 constexpr char CONFIG_FILE[] = "/config.json";
@@ -41,7 +42,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-17.11";
+constexpr char FIRMWARE_VERSION[] = "2026-10-17.13";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -97,6 +98,7 @@ String updateError;
 TrueConfResult trueConfResult;
 uint32_t lastTrueConfMs = 0;
 bool forceTrueConfRefresh = false;
+uint32_t webServerReadyMs = 0;
 
 bool touchRaw = false;
 bool touchStable = false;
@@ -1057,8 +1059,10 @@ void setup() {
   detectSensor();
   readSensor();
   setupWebServer();
+  webServerReadyMs = millis();
   forceClaudeRefresh = true;
-  forceTrueConfRefresh = config.trueConf.enabled;
+  forceTrueConfRefresh = false;
+  if (config.trueConf.enabled) trueConfResult.state = "Erster Abruf 60 Sekunden nach Webserver-Start";
   drawDisplay();
 }
 
@@ -1088,7 +1092,8 @@ void loop() {
   }
 
   if (config.trueConf.enabled && (forceTrueConfRefresh ||
-      millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL)) refreshTrueConf();
+      (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
+       millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
 
   // Auch Countdown und Netzstatus prüfen; unveränderte Textzeilen erzeugen keine SPI-Ausgabe.
   if (millis() - lastDisplayMs >= Timing::DISPLAY_MS) {

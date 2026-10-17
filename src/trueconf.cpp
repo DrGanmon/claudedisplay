@@ -1,5 +1,6 @@
 #include "trueconf.h"
 #include "trueconf_protocol.h"
+#include "trueconf_socket.h"
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
@@ -187,9 +188,8 @@ TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
   });
   uint8_t fingerprint[20];
   fingerprintBytes(config.fingerprint, fingerprint);
-  socket.beginSSL(config.host.c_str(), config.port, "/websocket/chat_bot/",
-                  config.insecure ? nullptr : fingerprint, "json.v1");
-  socket.setReconnectInterval(1);
+  beginTrueConfSocket(socket, config.host.c_str(), config.port,
+                     config.insecure ? nullptr : fingerprint);
   result.state = "TrueConf: Zeitüberschreitung";
   const uint32_t started = millis();
   while (!finished && millis() - started < 30000) { socket.loop(); delay(1); }

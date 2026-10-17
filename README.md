@@ -120,7 +120,7 @@ Falls ein TTP223 angeschlossen ist, startet eine kurze Berührung eine sofortige
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.11`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.13`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Version `2026-10-17.11` behebt vorzeitig abgeschnittene Einstellungsseiten bei leeren Konfigurationswerten. Leere Servernamen, Organisations-IDs oder andere optionale Textfelder dürfen keinen leeren HTTP-Chunk auslösen, da dieser die Antwort beendet. Der TrueConf-Abschnitt zeigt deshalb auch vor der ersten Konfiguration alle Felder und beide Buttons vollständig an.
 
@@ -143,6 +143,10 @@ Negative Fehlernummern stammen vom ESP8266-HTTPClient, nicht von Claude. `-4` be
 Hintergrund: [ESP8266-TLS-Puffer und MFLN](https://arduino-esp8266.readthedocs.io/en/latest/esp8266wifi/bearssl-client-secure-class.html#mfln-or-maximum-fragment-length-negotiation-saving-ram), [ArduinoJson mit HTTPClient](https://arduinojson.org/v7/how-to/use-arduinojson-with-httpclient/).
 
 ### TrueConf-Nachrichtenzähler einrichten
+
+Version `2026-10-17.13` behebt eine Neustartschleife beim TrueConf-WSS-Aufbau: Die verwendete WebSockets-Version 2.7.3 initialisiert bei lokalen Client-Instanzen die optionalen Client-Zertifikat- und Private-Key-Zeiger nicht vollständig. Die Firmware setzt beide vor dem ersten Verbindungsversuch ausdrücklich auf `nullptr`. Das betrifft die Client-Authentifizierung, die Server-Zertifikatsprüfung per Fingerprint bleibt erhalten. Der zugehörige Absturz zeigte `Exception (28)` in `BearSSL::PrivateKey::isRSA()` aus `WebSocketsClient::loop()`.
+
+Wenn die bisherige Firmware deshalb ständig neu startet, die neue Firmware per USB mit `pio run -e d1_mini --target upload` installieren. Kein Flash-Erase und kein Dateisystem-Upload sind nötig; die gespeicherte Konfiguration bleibt erhalten. Nach dem Start wartet der erste automatische TrueConf-Abruf mindestens 60 Sekunden ab Webserver-Start. Die Einstellungen können in dieser Zeit über HTTP geöffnet und TrueConf bei Bedarf deaktiviert werden; ein manuell gestarteter Test oder erneutes Speichern darf sofort abrufen. Die anschließenden synchronen Netzwerkabrufe können weiterhin vorübergehend die Bedienung verzögern.
 
 Der Zähler ist standardmäßig ausgeschaltet. Er verwendet die TrueConf-Bridge-Chat-API, nicht die administrative REST-Anrufverwaltung. Die Einrichtung erfolgt vollständig unter `/settings` im Abschnitt `TrueConf-Nachrichten`:
 
