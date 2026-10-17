@@ -214,6 +214,32 @@ Das Gerät sollte nur in einem vertrauenswürdigen lokalen Netzwerk betrieben we
 
 ## Bauen
 
+### Automatischer GitHub-Build und Downloads
+
+Der Workflow [Firmware bauen und veröffentlichen](.github/workflows/firmware.yml) baut die Umgebung `d1_mini` bei jedem Push, Pull Request und bei manuellem Start über **Actions → Firmware bauen und veröffentlichen → Run workflow**. Nach dem Build laufen die nativen Regressionstests. Erfolgreiche Läufe stellen für 30 Tage ein ZIP-Artefakt `firmware-d1-mini-<Commit-SHA>` mit folgenden Dateien bereit:
+
+- `firmware-d1-mini.bin`: Firmware für das Update über `/update` oder zum Flashen des D1 mini
+- `firmware-d1-mini.elf`: Symbole zur Analyse von Absturzadressen; nicht als Firmware hochladen
+- `manifest.json`: Firmwareversion, Quellcode-Commit, optionaler Tag, Board und SHA256-Prüfsummen
+- `SHA256SUMS`: Prüfsummen für die heruntergeladenen Dateien
+
+Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/workflows/firmware.yml). Beim Artefakt-Download muss man gegebenenfalls bei GitHub angemeldet sein; ZIP entpacken und nur die `.bin` im Geräte-Webinterface auswählen.
+
+Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
+
+```sh
+git tag v2026-10-17.15
+git push origin v2026-10-17.15
+```
+
+Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.
+
+Es wird ausschließlich die aktuell konfigurierte D1-mini-Firmware gebaut. Lokale Gerätekonfiguration, LittleFS-Abbilder und Zugangsdaten gehören nicht zum Downloadpaket. Hardwaretests auf dem ESP ersetzt der GitHub-Build nicht.
+
+Grundlagen: [PlatformIO in GitHub Actions](https://docs.platformio.org/en/latest/integration/ci/github-actions.html), [GitHub-Artefakte](https://github.com/actions/upload-artifact), [GitHub-CLI-Releases](https://cli.github.com/manual/gh_release_create).
+
+### Lokal kompilieren
+
 Voraussetzung ist eine PlatformIO-Installation. Im Projektverzeichnis:
 
 ```sh
@@ -227,3 +253,5 @@ Die fertige Binärdatei liegt anschließend unter:
 ```text
 .pio/build/d1_mini/firmware.bin
 ```
+
+Nach einem Build können die CI-Prüfungen lokal mit `python3 scripts/run_checks.py` ausgeführt werden (benötigt `g++`). `python3 scripts/package_firmware.py` erzeugt das Downloadpaket im ignorierten Verzeichnis `dist/`; das Zielverzeichnis muss leer sein. Ein anderes Ziel ist über `--output <Verzeichnis>` möglich.
