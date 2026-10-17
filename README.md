@@ -6,9 +6,9 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 
 - Wemos D1 Mini mit ESP8266
 - rundes GC9A01A-SPI-Display mit 240 × 240 Pixeln
-- TTP223-Touchsensor
-- BME280 für Temperatur, Luftdruck und Luftfeuchtigkeit oder
-- BMP280 für Temperatur und Luftdruck ohne Luftfeuchtigkeit
+- optional: TTP223-Touchsensor für manuelle Aktualisierung und WLAN-Reset
+- optional: BME280 für Temperatur, Luftdruck und Luftfeuchtigkeit oder
+- optional: BMP280 für Temperatur und Luftdruck ohne Luftfeuchtigkeit
 - geeignetes USB-Netzteil
 
 ## Funktionen
@@ -24,26 +24,31 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 - passwortgeschütztes Firmwareupdate per Datei-Upload im Browser
 - automatische WLAN-Wiederverbindung
 - Unterstützung von BMP280 und BME280 an den Adressen `0x76` und `0x77`
+- Betrieb ohne Klimasensor oder Touchsensor; das Display ist zwingend erforderlich
 - kompakte Anzeige ohne vollständigen Bildpuffer für den begrenzten ESP8266-RAM
 
 ### Display
 
+- frei wählbarer Display-Name unter `Einstellungen` → `Display-Einstellungen speichern`; bleibt auch ohne Claude-Zugang und Klimasensor sichtbar
+- IP-Adresse auf dem Display optional, standardmäßig eingeschaltet; über die Checkbox in den Display-Einstellungen ausschaltbar
 - schwarzer Hintergrund
-- weiße Schrift
+- weiße Schrift für Name, Klima und Netzwerk; Limit-Zahlen gehen mit steigendem Verbrauch stufenlos von Grün (0 % verbraucht) zu demselben kräftigen Rot wie der Ring (100 % verbraucht) über
 - äußerer, 15 Pixel dicker Ring: Fünf-Stunden-Sitzungslimit
 - innerer, 7 Pixel dicker Ring: Wochenlimit
-- Ringlänge entspricht dem noch freien Anteil
-- Grün: 0 bis einschließlich 60 % verbraucht
-- Gelb: über 60 bis unter 80 % verbraucht
-- Rot: ab 80 % verbraucht
+- grüner Ringanteil entspricht den noch freien Prozenten
+- übriger Ringanteil entspricht den verbrauchten Prozenten; seine Farbe geht mit steigendem Gesamtverbrauch stufenlos von Grau (`#808080` bei 0 %) zu kräftigem Rot (`#FF0000` bei 100 %) über
+- unbekannte Limits erscheinen als vollständig dunkelgrauer Ring
+- im normalen Betrieb nur geänderte Textzeilen und Ringsegmente aktualisieren; kleine Textpuffer vermeiden sichtbares Löschen vor dem Neuzeichnen
 - Mitte: Temperatur und freie Prozente für Sitzung (`S`) und Woche (`W`)
 
-### Bedienung des TTP223
+### Bedienung des optionalen TTP223
 
-- kurz berühren: Claude-Limits sofort aktualisieren
-- mindestens fünf Sekunden berühren: WLAN-Zugangsdaten löschen und ESP8266 neu starten
+- falls angeschlossen, kurz berühren: Claude-Limits sofort aktualisieren
+- falls angeschlossen, mindestens fünf Sekunden berühren: WLAN-Zugangsdaten löschen und ESP8266 neu starten
 - nach dem Neustart öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs
 - Claude-Zugang und übrige Gerätekonfiguration bleiben dabei erhalten
+- ohne Klimasensor zeigt das Gerät für Temperatur, Luftfeuchtigkeit und Luftdruck `--` an.
+- ohne TTP223 entfallen die Touch-Aktionen; WLAN und Gerät lassen sich weiterhin über die Webseite bedienen.
 
 ## Wiring Diagram
 
@@ -56,10 +61,10 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
   GC9A01 DC ─────────┤ D4 / GPIO2                 │
   GC9A01 RST ────────┤ D0 / GPIO16                │
                      │                            │
-  TTP223 OUT ────────┤ D6 / GPIO12                │
+ TTP223 OUT ────────┤ D6 / GPIO12 (optional)     │
                      │                            │
-  BMP/BME280 SCL ────┤ D1 / GPIO5                 │
-  BMP/BME280 SDA ────┤ D2 / GPIO4                 │
+ BMP/BME280 SCL ────┤ D1 / GPIO5 (optional)      │
+ BMP/BME280 SDA ────┤ D2 / GPIO4 (optional)      │
                      │                            │
   alle VCC ──────────┤ 3V3                        │
   alle GND ──────────┤ GND                        │
@@ -86,13 +91,13 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 | GC9A01 | CS | GND | – | Display dauerhaft ausgewählt |
 | GC9A01 | BL/LED | 3V3 | – | abhängig vom konkreten Displaymodul |
 | GC9A01 | SDO/MISO | offen | – | wird nicht benötigt |
-| BMP/BME280 | VCC/VIN | 3V3 | – | Sensorversorgung |
-| BMP/BME280 | GND | GND | – | gemeinsame Masse |
-| BMP/BME280 | SCL | D1 | 5 | I²C-Takt |
-| BMP/BME280 | SDA | D2 | 4 | I²C-Daten |
-| TTP223 | VCC | 3V3 | – | Sensorversorgung |
-| TTP223 | GND | GND | – | gemeinsame Masse |
-| TTP223 | OUT/SIG | D6 | 12 | Touchsignal, aktiv HIGH |
+| BMP/BME280 (optional) | VCC/VIN | 3V3 | – | Sensorversorgung |
+| BMP/BME280 (optional) | GND | GND | – | gemeinsame Masse |
+| BMP/BME280 (optional) | SCL | D1 | 5 | I²C-Takt |
+| BMP/BME280 (optional) | SDA | D2 | 4 | I²C-Daten |
+| TTP223 (optional) | VCC | 3V3 | – | Sensorversorgung |
+| TTP223 (optional) | GND | GND | – | gemeinsame Masse |
+| TTP223 (optional) | OUT/SIG | D6 | 12 | Touchsignal, aktiv HIGH |
 
 Alle Komponenten müssen eine gemeinsame Masse besitzen. Die Signale des ESP8266 arbeiten mit 3,3 V. Vor dem Anschluss der Display-Hintergrundbeleuchtung bitte die Beschriftung beziehungsweise Dokumentation des konkreten GC9A01-Moduls prüfen.
 
@@ -104,11 +109,32 @@ Alle Komponenten müssen eine gemeinsame Masse besitzen. Die Signale des ESP8266
 4. Danach im Heimnetz `http://claude-display.local/` öffnen. Falls mDNS nicht funktioniert, die im Router angezeigte IP verwenden.
 5. `Einstellungen` öffnen. Initiale Zugangsdaten: Benutzer `admin`, Passwort `claude-display`.
 6. Den `sessionKey` aus dem Browser, optional weitere Cookies und gegebenenfalls die Organisations-ID eintragen. Ohne Organisations-ID versucht das Gerät die erste verfügbare Organisation automatisch zu ermitteln.
-7. Das Web-Passwort ändern.
+7. `Claude-Einstellungen und Session-Key speichern` drücken. Anschließend unter Einstellungen mit `Gespeicherten Session-Key testen` die Verbindung prüfen. Der Test zeigt das Ergebnis an und aktualisiert bei Erfolg die Claude-Limits.
+8. Im Abschnitt `Web-Passwort ändern` das aktuelle Passwort und zweimal das neue Passwort (mindestens 8 Zeichen) eingeben und `Passwort ändern` drücken. Danach mit Benutzer `admin` und dem neuen Passwort anmelden.
 
-Eine kurze Berührung des TTP223 startet eine sofortige Claude-Aktualisierung. Eine Berührung von mindestens fünf Sekunden löscht die gespeicherten WLAN-Zugangsdaten und startet das Gerät neu. Da danach keine WLAN-Konfiguration vorhanden ist, öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs. Claude-Konfiguration und Anzeigeeinstellungen bleiben erhalten.
+Falls ein TTP223 angeschlossen ist, startet eine kurze Berührung eine sofortige Claude-Aktualisierung. Eine Berührung von mindestens fünf Sekunden löscht die gespeicherten WLAN-Zugangsdaten und startet das Gerät neu. Da danach keine WLAN-Konfiguration vorhanden ist, öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs. Claude-Konfiguration und Anzeigeeinstellungen bleiben erhalten.
 
 ## Webseite
+
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.9`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+
+Beim Neustart zeigt das Display vor dem WLAN-Verbindungsaufbau jeweils eine halbe Sekunde Rot, Grün, Blau und Weiß. Dieser Selbsttest läuft unabhängig von WLAN, Sensoren und Claude. Bleiben auch diese Flächen unsichtbar, liegt das Problem vor der normalen Statusanzeige. Der SPI-Takt ist zur Fehlersuche auf 10 MHz reduziert. Der serielle Monitor mit 115200 Baud zeigt Firmwareversion, erwartete Display-Verdrahtung und den Start des Selbsttests; diese Meldungen bestätigen den Programmablauf, aber keine erfolgreiche Kommunikation mit dem Display.
+
+Der Display-Name wird separat gespeichert und auch während des WLAN-Verbindungsaufbaus und im Setup angezeigt. Ein vollständig schwarzes Display trotz neuer Firmware deutet auf ein Problem mit Versorgung, Hintergrundbeleuchtung, Verkabelung oder dem verwendeten Displaymodul hin. Insbesondere `BL/LED`, gemeinsame Masse sowie CLK, MOSI, DC und RST entsprechend der Pin-Tabelle prüfen.
+
+### Claude-Verbindung prüfen
+
+Standard ist ein Firefox-140-Profil für Windows: `Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0`. Der bisherige Chrome-130-Standard wird beim Laden automatisch ersetzt; individuelle User-Agents bleiben erhalten. Mit `Firefox unter Windows einsetzen` kann die Vorgabe im Webformular eingesetzt und anschließend gespeichert werden. Beide Claude-Anfragen senden außerdem `Accept-Language` und die Fetch-Metadaten `Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`, `Sec-Fetch-Site: same-origin`.
+
+Diese Header ändern weder den TLS-Client des ESP8266 noch führen sie Browser-JavaScript aus. Eine Freigabe durch Cloudflare ist damit nicht garantiert. HTTP/1.0 und unkomprimierte Antworten bleiben für die speichersparende JSON-Verarbeitung erforderlich. Bei übernommenen Browser-Cookies den tatsächlichen User-Agent dieses Browsers verwenden. Das Format des Firefox-User-Agents beschreibt [Mozilla](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/User-Agent/Firefox).
+
+Beim Vergleich mit `claudeusage.ps1` dieselbe Organisations-ID, dieselben zusätzlichen Cookies und denselben User-Agent verwenden; der Session-Key allein bildet nicht zwingend die vollständige Konfiguration ab. Die Firmware entfernt wie das Skript äußere Leerzeichen und das optionale Präfix `sessionKey=`. Geheimnisse werden nicht in Fehlermeldungen ausgegeben.
+
+Seit Version `2026-10-17.6` extrahiert die Firmware wie das PS1-Skript die erste UUID aus dem Organisationsfeld, etwa aus `Name [UUID]` oder einer URL. Das gilt auch für bereits gespeicherte Werte. Ungültige nichtleere Organisationsfelder werden beim Speichern abgewiesen und vor einem Abruf geprüft. Bei einem 404 zeigt die Fehlermeldung die tatsächlich verwendete UUID zum Vergleich mit dem PS1 an. Ein 404 allein beweist weder einen ungültigen Session-Key noch eine nicht existierende Organisation; der Endpunkt kann auch für die Sitzung unzugänglich sein.
+
+Negative Fehlernummern stammen vom ESP8266-HTTPClient, nicht von Claude. `-4` bedeutet in der verwendeten Bibliothek „not connected“, bevor die HTTP-Antwort gelesen werden konnte. Seit Version `2026-10-17.4` verwenden Organisationssuche und Limit-Abruf einen TLS-Empfangspuffer von 16 KiB statt unbestätigt verkleinerter Puffer. HTTP/1.0 und `Accept-Encoding: identity` vermeiden Chunk-Framing beziehungsweise Kompression beim direkten JSON-Lesen aus dem Stream. Fehler zeigen den betroffenen Abruf, den HTTPClient-Fehlertext und bei Transportfehlern zusätzlich verfügbare TLS-Details und freien Heap. Erkannte Cloudflare-Challenges werden gesondert gemeldet.
+
+Hintergrund: [ESP8266-TLS-Puffer und MFLN](https://arduino-esp8266.readthedocs.io/en/latest/esp8266wifi/bearssl-client-secure-class.html#mfln-or-maximum-fragment-length-negotiation-saving-ram), [ArduinoJson mit HTTPClient](https://arduinojson.org/v7/how-to/use-arduinojson-with-httpclient/).
 
 - `/`: Klima-, Limit- und Gerätestatus
 - `/settings`: geschützte Claude- und Gerätekonfiguration

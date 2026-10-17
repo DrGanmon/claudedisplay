@@ -14,6 +14,7 @@
 #include <TFT_eSPI.h>
 #include <Adafruit_BME280.h>
 #include <Adafruit_BMP280.h>
+#include "org_id.h"
 
 namespace Pins {
 constexpr uint8_t I2C_SDA = D2;
@@ -36,12 +37,17 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
+constexpr char FIRMWARE_VERSION[] = "2026-10-17.9";
+constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
+constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 struct Config {
+  String displayName = "Claude Display";
+  bool showIp = true;
   String sessionKey;
   String orgId;
   String extraCookies;
-  String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  String userAgent = FIREFOX_WINDOWS_USER_AGENT;
   String webPassword = DEFAULT_WEB_PASSWORD;
   uint32_t intervalSec = 180;
 };
@@ -77,6 +83,7 @@ uint32_t lastClaudeMs = 0;
 uint32_t lastWifiRetryMs = 0;
 bool forceClaudeRefresh = false;
 bool displayDirty = true;
+bool displayNeedsFullRedraw = true;
 bool updateAuthenticated = false;
 bool updateSuccessful = false;
 String updateError;
@@ -84,6 +91,7 @@ String updateError;
 bool touchRaw = false;
 bool touchStable = false;
 bool touchLongHandled = false;
+bool touchAvailable = false;
 uint32_t touchChangedMs = 0;
 uint32_t touchPressedMs = 0;
 
@@ -110,9 +118,24 @@ String percentText(const LimitBucket &bucket, bool remaining = true) {
 }
 
 uint16_t limitColor(float used) {
-  if (used >= 80.0f) return TFT_RED;
-  if (used > 60.0f) return TFT_YELLOW;
-  return TFT_GREEN;
+  const float fraction = constrain(used, 0.0f, 100.0f) / 100.0f;
+  return display.color565(static_cast<uint8_t>(255.0f * fraction + 0.5f),
+                          static_cast<uint8_t>(255.0f * (1.0f - fraction) + 0.5f), 0);
+}
+
+void normalizeClaudeConfig() {
+  config.sessionKey.trim();
+  if (config.sessionKey.startsWith("sessionKey=")) config.sessionKey.remove(0, 11);
+  config.sessionKey.trim();
+  // Ein kopierter Cookie-Wert kann mit einem Semikolon enden.
+  while (config.sessionKey.endsWith(";")) config.sessionKey.remove(config.sessionKey.length() - 1);
+  config.extraCookies.trim();
+  while (config.extraCookies.endsWith(";")) config.extraCookies.remove(config.extraCookies.length() - 1);
+  config.orgId.trim();
+  const size_t uuidStart = findOrganizationUuid(config.orgId.c_str(), config.orgId.length());
+  if (uuidStart != config.orgId.length()) config.orgId = config.orgId.substring(uuidStart, uuidStart + 36);
+  config.userAgent.trim();
+  if (!config.userAgent.length()) config.userAgent = FIREFOX_WINDOWS_USER_AGENT;
 }
 
 bool loadConfig() {
@@ -123,17 +146,24 @@ bool loadConfig() {
   const DeserializationError error = deserializeJson(doc, file);
   file.close();
   if (error) return false;
+  config.displayName = doc["displayName"] | "Claude Display";
+  config.showIp = doc["showIp"] | true;
+  if (!config.displayName.length()) config.displayName = "Claude Display";
   config.sessionKey = doc["sessionKey"] | "";
   config.orgId = doc["orgId"] | "";
   config.extraCookies = doc["extraCookies"] | "";
   config.userAgent = doc["userAgent"] | config.userAgent;
+  if (config.userAgent == LEGACY_USER_AGENT) config.userAgent = FIREFOX_WINDOWS_USER_AGENT;
   config.webPassword = doc["webPassword"] | DEFAULT_WEB_PASSWORD;
   config.intervalSec = constrain(static_cast<uint32_t>(doc["intervalSec"] | 180), 60UL, 3600UL);
+  normalizeClaudeConfig();
   return true;
 }
 
 bool saveConfig() {
   JsonDocument doc;
+  doc["displayName"] = config.displayName;
+  doc["showIp"] = config.showIp;
   doc["sessionKey"] = config.sessionKey;
   doc["orgId"] = config.orgId;
   doc["extraCookies"] = config.extraCookies;
@@ -148,6 +178,7 @@ bool saveConfig() {
 }
 
 void beginPage(const __FlashStringHelper *title) {
+  web.sendHeader("Cache-Control", "no-store");
   web.setContentLength(CONTENT_LENGTH_UNKNOWN);
   web.send(200, "text/html; charset=utf-8", "");
   web.sendContent(F("<!doctype html><html lang='de'><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -158,6 +189,9 @@ void beginPage(const __FlashStringHelper *title) {
   web.sendContent(F("<nav><a href='/'>Status</a><a href='/settings'>Einstellungen</a><a href='/update'>Firmware-Update</a></nav><h1>"));
   web.sendContent(title);
   web.sendContent(F("</h1>"));
+  web.sendContent(F("<p>Firmware: "));
+  web.sendContent(FIRMWARE_VERSION);
+  web.sendContent(F("</p>"));
 }
 
 void endPage() {
@@ -210,7 +244,17 @@ void handleStatus() {
 void handleSettings() {
   if (!requireSettingsAuth()) return;
   beginPage(F("Einstellungen"));
-  web.sendContent(F("<div class='card'><form method='post' action='/settings'>"
+  web.sendContent(F("<div class='card'><h2>Display-Einstellungen</h2><form method='post' action='/settings/name'>"
+                    "<label>Name auf dem Display<input name='displayName' maxlength='24' required value='"));
+  web.sendContent(htmlEscape(config.displayName));
+  web.sendContent(F("'></label><label><input type='checkbox' name='showIp' value='1' style='width:auto' "));
+  if (config.showIp) web.sendContent(F("checked "));
+  web.sendContent(F("> IP-Adresse auf dem Display anzeigen</label>"
+                    "<button type='submit'>Display-Einstellungen speichern</button></form></div>"
+                    "<div class='card'><h2>Claude-Zugang</h2><form method='post' action='/settings/test'>"
+                    "<button type='submit'>Gespeicherten Session-Key testen</button></form>"
+                    "<form method='post' action='/settings'>"
+                    "<button type='submit'>Claude-Einstellungen und Session-Key speichern</button>"
                     "<p class='warn'>Der sessionKey entspricht deiner Claude-Anmeldung. Das Feld leer lassen, um den gespeicherten Wert beizubehalten.</p>"
                     "<label>Claude sessionKey<input type='password' name='sessionKey' autocomplete='new-password' placeholder='"));
   web.sendContent(config.sessionKey.length() ? "gespeichert" : "nicht gespeichert");
@@ -218,35 +262,114 @@ void handleSettings() {
   web.sendContent(htmlEscape(config.orgId));
   web.sendContent(F("'></label><label>Weitere Cookies (optional)<input type='password' name='extraCookies' placeholder='"));
   web.sendContent(config.extraCookies.length() ? "gespeichert" : "z. B. cf_clearance=..." );
-  web.sendContent(F("'></label><label>User-Agent<input name='userAgent' value='"));
+  web.sendContent(F("'></label><label>User-Agent<input id='userAgent' name='userAgent' value='"));
   web.sendContent(htmlEscape(config.userAgent));
-  web.sendContent(F("'></label><label>Abrufintervall in Sekunden (60–3600)<input type='number' min='60' max='3600' name='intervalSec' value='"));
+  web.sendContent(F("'></label><button type='button' data-user-agent='"));
+  web.sendContent(htmlEscape(FIREFOX_WINDOWS_USER_AGENT));
+  web.sendContent(F("' onclick=\"document.getElementById('userAgent').value=this.dataset.userAgent\">Firefox unter Windows einsetzen</button>"
+                    "<p>Danach die Claude-Einstellungen speichern. Bei zusätzlichen Browser-Cookies den exakten User-Agent dieses Browsers eintragen.</p>"
+                    "<label>Abrufintervall in Sekunden (60–3600)<input type='number' min='60' max='3600' name='intervalSec' value='"));
   web.sendContent(String(config.intervalSec));
-  web.sendContent(F("'></label><label>Neues Web-Passwort<input type='password' name='webPassword' autocomplete='new-password' placeholder='leer = beibehalten'></label>"
-                    "<button>Speichern</button></form></div>"
+  web.sendContent(F("'></label><button type='submit'>Claude-Einstellungen und Session-Key speichern</button></form>"
+                    "<form method='post' action='/settings/test'><p>Vor dem Test einen neuen Key speichern. Getestet wird der gespeicherte Key.</p>"
+                    "<button type='submit' onclick=\"this.textContent='Teste ...';this.form.submit();this.disabled=true\">Gespeicherten Session-Key testen</button></form></div>"
+                    "<div class='card'><h2>Web-Passwort ändern</h2><form method='post' action='/settings/password'>"
+                    "<label>Aktuelles Passwort<input type='password' name='currentPassword' autocomplete='current-password' required></label>"
+                    "<label>Neues Passwort (mindestens 8 Zeichen)<input type='password' name='webPassword' autocomplete='new-password' minlength='8' required></label>"
+                    "<label>Neues Passwort bestätigen<input type='password' name='confirmPassword' autocomplete='new-password' minlength='8' required></label>"
+                    "<button type='submit'>Passwort ändern</button></form></div>"
                     "<div class='card'><p>Benutzername der Einstellungsseite: <b>admin</b></p>"
-                    "<p>WLAN neu einrichten: TTP223 mindestens 5 Sekunden berühren.</p></div>"));
+                    "<p>Falls ein TTP223 angeschlossen ist: mindestens 5 Sekunden berühren, um WLAN neu einzurichten.</p></div>"));
   endPage();
+}
+
+void settingsResult(const String &message) {
+  beginPage(F("Einstellungen"));
+  web.sendContent(F("<div class='card'><p role='status'>"));
+  web.sendContent(htmlEscape(message));
+  web.sendContent(F("</p><a href='/settings'>Zurück zu den Einstellungen</a></div>"));
+  endPage();
+}
+
+void handleSaveDisplayName() {
+  if (!requireSettingsAuth()) return;
+  String name = web.arg("displayName");
+  name.trim();
+  if (!name.length() || name.length() > 24) {
+    settingsResult("Bitte einen Display-Namen mit 1 bis 24 Bytes eingeben (Umlaute benötigen mehrere Bytes).");
+    return;
+  }
+  const String previous = config.displayName;
+  const bool previousShowIp = config.showIp;
+  config.displayName = name;
+  config.showIp = web.hasArg("showIp");
+  if (!saveConfig()) {
+    config.displayName = previous;
+    config.showIp = previousShowIp;
+    settingsResult("Display-Einstellungen konnten nicht gespeichert werden.");
+    return;
+  }
+  displayDirty = true;
+  settingsResult("Display-Einstellungen gespeichert. Die Anzeige wird sofort aktualisiert.");
+}
+
+void handleChangePassword() {
+  if (!requireSettingsAuth()) return;
+  if (web.arg("currentPassword") != config.webPassword) {
+    settingsResult("Das aktuelle Passwort ist falsch.");
+    return;
+  }
+  const String password = web.arg("webPassword");
+  if (password.length() < 8 || password != web.arg("confirmPassword")) {
+    settingsResult("Das neue Passwort muss mindestens 8 Zeichen lang sein und die Bestätigung muss übereinstimmen.");
+    return;
+  }
+  const String previous = config.webPassword;
+  config.webPassword = password;
+  if (!saveConfig()) {
+    config.webPassword = previous;
+    settingsResult("Passwort konnte nicht gespeichert werden.");
+    return;
+  }
+  settingsResult("Passwort geändert. Bei der nächsten Anmeldung Benutzer admin und das neue Passwort verwenden.");
+}
+
+void fetchClaudeUsage();
+
+void handleTestSessionKey() {
+  if (!requireSettingsAuth()) return;
+  forceClaudeRefresh = false;
+  fetchClaudeUsage();
+  lastClaudeMs = millis();
+  displayDirty = true;
+  settingsResult(claudeState == "Verbunden"
+      ? String("Test erfolgreich: Der gespeicherte Session-Key funktioniert. Claude-Limits wurden aktualisiert.")
+      : String("Test fehlgeschlagen: ") + claudeState);
 }
 
 void handleSaveSettings() {
   if (!requireSettingsAuth()) return;
+  const Config previous = config;
   const String newSessionKey = web.arg("sessionKey");
   const String newExtraCookies = web.arg("extraCookies");
-  const String newPassword = web.arg("webPassword");
   if (newSessionKey.length()) {
     config.sessionKey = newSessionKey;
     if (config.sessionKey.startsWith("sessionKey=")) config.sessionKey.remove(0, 11);
   }
   if (newExtraCookies.length()) config.extraCookies = newExtraCookies;
-  if (newPassword.length() >= 8) config.webPassword = newPassword;
   config.orgId = web.arg("orgId");
   config.userAgent = web.arg("userAgent");
   config.intervalSec = constrain(static_cast<uint32_t>(web.arg("intervalSec").toInt()), 60UL, 3600UL);
+  normalizeClaudeConfig();
+  if (config.orgId.length() && findOrganizationUuid(config.orgId.c_str(), config.orgId.length()) != 0) {
+    config = previous;
+    settingsResult("Nicht gespeichert: Die Organisations-ID muss eine UUID sein. Aus dem PS1 kann auch Name [UUID] übernommen werden. Leer lassen startet die automatische Suche.");
+    return;
+  }
   const bool ok = saveConfig();
-  forceClaudeRefresh = true;
-  web.sendHeader("Location", ok ? "/" : "/settings");
-  web.send(303, "text/plain", ok ? "Gespeichert" : "Speichern fehlgeschlagen");
+  if (!ok) config = previous;
+  settingsResult(ok ? "Claude-Einstellungen und Session-Key gespeichert. Der gespeicherte Key kann jetzt getestet werden."
+                    : "Speichern fehlgeschlagen. Bitte erneut versuchen.");
 }
 
 void handleUpdatePage() {
@@ -286,6 +409,7 @@ void handleUpdateUpload() {
       updateError = "Update konnte nicht gestartet werden (Fehler " + String(Update.getError()) + ").";
       return;
     }
+    displayNeedsFullRedraw = true;
     display.fillScreen(TFT_BLACK);
     display.setTextDatum(MC_DATUM);
     display.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -331,6 +455,9 @@ void setupWebServer() {
   web.on("/", HTTP_GET, handleStatus);
   web.on("/settings", HTTP_GET, handleSettings);
   web.on("/settings", HTTP_POST, handleSaveSettings);
+  web.on("/settings/name", HTTP_POST, handleSaveDisplayName);
+  web.on("/settings/password", HTTP_POST, handleChangePassword);
+  web.on("/settings/test", HTTP_POST, handleTestSessionKey);
   web.on("/update", HTTP_GET, handleUpdatePage);
   web.on("/update", HTTP_POST, handleUpdateFinished, handleUpdateUpload);
   web.on("/refresh", HTTP_POST, []() {
@@ -376,34 +503,80 @@ String cookieHeader() {
 }
 
 void applyClaudeHeaders(HTTPClient &http) {
+  // getStream() umgeht den HTTPClient-Chunkdecoder. HTTP/1.0 fordert
+  // eine ungechunkte Antwort an; komprimierte Antworten nicht anfordern.
+  http.useHTTP10(true);
+  http.setTimeout(20000);
+  const char *responseHeaders[] = {"cf-mitigated", "Content-Encoding", "Transfer-Encoding"};
+  http.collectHeaders(responseHeaders, 3);
   http.addHeader("Cookie", cookieHeader());
   http.addHeader("Accept", "application/json");
+  http.addHeader("Accept-Encoding", "identity");
   http.addHeader("Referer", "https://claude.ai/settings/usage");
+  // Metadaten eines gleichursprünglichen Fetch-Aufrufs der Nutzungsseite.
+  http.addHeader("Accept-Language", "de-DE,de;q=0.9,en-US;q=0.7,en;q=0.5");
+  http.addHeader("Sec-Fetch-Dest", "empty");
+  http.addHeader("Sec-Fetch-Mode", "cors");
+  http.addHeader("Sec-Fetch-Site", "same-origin");
   http.setUserAgent(config.userAgent);
 }
 
 String httpErrorText(int code) {
+  if (code < 0) return "Verbindungsfehler " + String(code) + ": " + HTTPClient::errorToString(code);
   switch (code) {
     case 401: return "Sitzung abgelaufen (401)";
     case 403: return "Zugriff/Cloudflare (403)";
-    case 404: return "Organisation nicht gefunden (404)";
+    case 404: return "Endpunkt nicht gefunden oder Organisation nicht zugänglich (404)";
     case 429: return "Zu viele Anfragen (429)";
     default: return "HTTP-Fehler " + String(code);
   }
+}
+
+String claudeRequestError(int code, HTTPClient &http, BearSSL::WiFiClientSecure &client) {
+  if (code == 403 && http.header("cf-mitigated").equalsIgnoreCase("challenge")) {
+    return "Cloudflare-Challenge (403). Weitere Cookies und User-Agent wie im PS1-Skript prüfen.";
+  }
+  String message = httpErrorText(code);
+  if (code < 0) {
+    char detail[160] = {};
+    const int tlsError = client.getLastSSLError(detail, sizeof(detail));
+    if (tlsError) message += "; TLS " + String(tlsError) + ": " + String(detail);
+    message += "; freier Heap " + String(ESP.getFreeHeap()) + " Bytes";
+    // Keine Cookies, Header oder Antwortinhalte protokollieren.
+  }
+  return message;
+}
+
+bool claudeResponseEncodingSupported(HTTPClient &http) {
+  const String encoding = http.header("Content-Encoding");
+  const String transfer = http.header("Transfer-Encoding");
+  if ((encoding.length() && !encoding.equalsIgnoreCase("identity")) ||
+      (transfer.length() && !transfer.equalsIgnoreCase("identity"))) {
+    claudeState = "Nicht unterstützte Antwortkodierung trotz HTTP/1.0 und Accept-Encoding: identity";
+    return false;
+  }
+  return true;
 }
 
 bool discoverOrganization() {
   BearSSL::WiFiClientSecure client;
   // ESP8266 besitzt keinen gepflegten System-Zertifikatsspeicher. Siehe README.
   client.setInsecure();
-  client.setBufferSizes(512, 512);
+  // Ohne ausgehandeltes MFLN muss der volle TLS-Record (16 KiB) hineinpassen.
+  client.setBufferSizes(16384, 512);
   HTTPClient http;
-  http.setTimeout(12000);
-  if (!http.begin(client, CLAUDE_BASE)) return false;
+  if (!http.begin(client, CLAUDE_BASE)) {
+    claudeState = "Organisationssuche: HTTPS konnte nicht starten";
+    return false;
+  }
   applyClaudeHeaders(http);
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    claudeState = httpErrorText(code);
+    claudeState = "Organisationssuche: " + claudeRequestError(code, http, client);
+    http.end();
+    return false;
+  }
+  if (!claudeResponseEncodingSupported(http)) {
     http.end();
     return false;
   }
@@ -413,6 +586,10 @@ bool discoverOrganization() {
   const DeserializationError error = deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
   if (!error && doc.is<JsonArray>() && doc.size() > 0) config.orgId = doc[0]["uuid"].as<String>();
   http.end();
+  if (error) {
+    claudeState = "Organisationssuche: JSON-Fehler: " + String(error.c_str());
+    return false;
+  }
   if (config.orgId.length()) saveConfig();
   return config.orgId.length() > 0;
 }
@@ -429,6 +606,7 @@ void readBucket(JsonObjectConst root, const char *key, LimitBucket &bucket) {
 }
 
 void fetchClaudeUsage() {
+  normalizeClaudeConfig();
   if (WiFi.status() != WL_CONNECTED || !config.sessionKey.length()) {
     claudeState = config.sessionKey.length() ? "WLAN getrennt" : "sessionKey fehlt";
     return;
@@ -439,12 +617,15 @@ void fetchClaudeUsage() {
     if (claudeState == "Aktualisiere ...") claudeState = "Keine Organisation gefunden";
     return;
   }
+  if (config.orgId.length() != 36 || findOrganizationUuid(config.orgId.c_str(), config.orgId.length()) != 0) {
+    claudeState = "Ungültige Organisations-ID. UUID aus den PS1-Einstellungen übernehmen oder Feld für automatische Suche leeren.";
+    return;
+  }
 
   BearSSL::WiFiClientSecure client;
   client.setInsecure();
-  client.setBufferSizes(1024, 512);
+  client.setBufferSizes(16384, 512);
   HTTPClient http;
-  http.setTimeout(15000);
   const String url = String(CLAUDE_BASE) + "/" + config.orgId + "/usage";
   if (!http.begin(client, url)) {
     claudeState = "HTTPS konnte nicht starten";
@@ -453,7 +634,12 @@ void fetchClaudeUsage() {
   applyClaudeHeaders(http);
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    claudeState = httpErrorText(code);
+    claudeState = "Limit-Abruf: " + claudeRequestError(code, http, client);
+    if (code == 404) claudeState += "; verwendete Org-ID: " + config.orgId + ". Mit der ID im PS1 vergleichen.";
+    http.end();
+    return;
+  }
+  if (!claudeResponseEncodingSupported(http)) {
     http.end();
     return;
   }
@@ -506,48 +692,129 @@ void readSensor() {
   displayDirty = true;
 }
 
-void drawLimitRing(int radius, int thickness, const LimitBucket &bucket) {
+struct RingDrawState {
+  int angle = 0;
+  uint16_t color = TFT_DARKGREY;
+  bool valid = false;
+};
+
+uint16_t consumedRingColor(float used) {
+  const float fraction = constrain(used, 0.0f, 100.0f) / 100.0f;
+  // Gleichmäßiger Übergang: Grau (#808080) -> kräftiges Rot (#FF0000).
+  const uint8_t red = static_cast<uint8_t>(128.0f + 127.0f * fraction + 0.5f);
+  const uint8_t other = static_cast<uint8_t>(128.0f * (1.0f - fraction) + 0.5f);
+  return display.color565(red, other, other);
+}
+
+void drawLimitRing(int radius, int thickness, const LimitBucket &bucket,
+                   RingDrawState &previous, bool fullRedraw) {
   const int inner = radius - thickness;
-  display.drawArc(120, 120, radius, inner, 0, 360, TFT_DARKGREY, TFT_BLACK, true);
-  if (!bucket.valid) return;
-  const float remaining = constrain(100.0f - bucket.used, 0.0f, 100.0f);
-  const int endAngle = static_cast<int>(360.0f * remaining / 100.0f);
-  if (endAngle > 0) display.drawArc(120, 120, radius, inner, 0, endAngle, limitColor(bucket.used), TFT_BLACK, true);
+  const int angle = bucket.valid
+      ? static_cast<int>(360.0f * constrain(100.0f - bucket.used, 0.0f, 100.0f) / 100.0f) : 0;
+  const uint16_t color = bucket.valid ? consumedRingColor(bucket.used) : TFT_DARKGREY;
+  const bool reset = fullRedraw || bucket.valid != previous.valid;
+  if (reset) {
+    if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, color, TFT_BLACK, true);
+    if (angle > 0) display.drawArc(120, 120, radius, inner, 0, angle, TFT_GREEN, TFT_BLACK, true);
+  } else {
+    if (color != previous.color) {
+      // Der ganze verbrauchte Anteil ändert seine Farbe mit dem Verbrauch.
+      if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, color, TFT_BLACK, true);
+    } else if (angle < previous.angle) {
+      display.drawArc(120, 120, radius, inner, angle, previous.angle, color, TFT_BLACK, true);
+    }
+    if (angle > previous.angle) {
+      display.drawArc(120, 120, radius, inner, previous.angle, angle, TFT_GREEN, TFT_BLACK, true);
+    } else if (angle > 0 && (angle < previous.angle || color != previous.color)) {
+      display.drawArc(120, 120, radius, inner, max(0, angle - 1), angle, TFT_GREEN, TFT_BLACK, true);
+    }
+  }
+  previous.angle = angle;
+  previous.color = color;
+  previous.valid = bucket.valid;
+}
+
+void drawDisplayName(int y = 58) {
+  display.setTextDatum(MC_DATUM);
+  display.setTextColor(TFT_WHITE, TFT_BLACK);
+  display.setTextFont(2);
+  String name = config.displayName;
+  if (display.textWidth(name) > 140) display.setTextFont(1);
+  while (display.textWidth(name) > 140 && name.length()) name.remove(name.length() - 1);
+  display.drawString(name, 120, y);
+}
+
+struct TextDrawState {
+  String text;
+  uint16_t color = TFT_WHITE;
+};
+
+void drawChangedText(const String &text, uint16_t color, int y, int width, int height,
+                     uint8_t font, TextDrawState &previous, bool fullRedraw) {
+  if (!fullRedraw && text == previous.text && color == previous.color) return;
+  // Nur eine kleine Textzeile puffern; kein 240x240-Vollbild im ESP8266-RAM.
+  TFT_eSprite row(&display);
+  row.setColorDepth(16);
+  if (row.createSprite(width, height)) {
+    row.fillSprite(TFT_BLACK);
+    row.setTextDatum(MC_DATUM);
+    row.setTextColor(color, TFT_BLACK);
+    row.setTextFont(font);
+    if (row.textWidth(text) > width) row.setTextFont(1);
+    String fitted = text;
+    while (row.textWidth(fitted) > width && fitted.length()) fitted.remove(fitted.length() - 1);
+    row.drawString(fitted, width / 2, height / 2);
+    row.pushSprite(120 - width / 2, y - height / 2);
+    row.deleteSprite();
+  } else {
+    // Bei knappem Heap weiterhin eine lesbare Anzeige ohne Vollbildlöschen.
+    display.setTextDatum(MC_DATUM);
+    display.setTextColor(color, TFT_BLACK);
+    display.setTextFont(font);
+    if (display.textWidth(text) > width) display.setTextFont(1);
+    String fitted = text;
+    while (display.textWidth(fitted) > width && fitted.length()) fitted.remove(fitted.length() - 1);
+    display.setTextPadding(width);
+    display.drawString(fitted, 120, y);
+    display.setTextPadding(0);
+  }
+  previous.text = text;
+  previous.color = color;
 }
 
 void drawDisplay() {
-  display.fillScreen(TFT_BLACK);
+  static RingDrawState sessionRing, weeklyRing;
+  static TextDrawState name, temperature, session, weekly, network;
+  const bool fullRedraw = displayNeedsFullRedraw;
+  if (fullRedraw) display.fillScreen(TFT_BLACK);
 
-  // Außen: Sitzung, deutlich dicker. Innen: Wochenlimit.
-  drawLimitRing(119, 15, sessionLimit);
-  drawLimitRing(98, 7, weeklyLimit);
-
-  display.setTextDatum(MC_DATUM);
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.setTextFont(4);
-  const String temperature = isnan(temperatureC) ? "--.- C" : String(temperatureC, 1) + " C";
-  display.drawString(temperature, 120, 82);
-
-  display.setTextFont(2);
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.drawString("frei", 120, 108);
-
-  display.setTextFont(4);
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.drawString("S " + percentText(sessionLimit) + "%", 120, 137);
-
-  display.setTextFont(2);
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.drawString("W " + percentText(weeklyLimit) + "%", 120, 166);
-
-  if (WiFi.status() != WL_CONNECTED) {
+  drawLimitRing(119, 15, sessionLimit, sessionRing, fullRedraw);
+  drawLimitRing(98, 7, weeklyLimit, weeklyRing, fullRedraw);
+  drawChangedText(config.displayName, TFT_WHITE, 58, 112, 16, 2, name, fullRedraw);
+  const String temperatureText = isnan(temperatureC) ? "--.- C" : String(temperatureC, 1) + " C";
+  drawChangedText(temperatureText, TFT_WHITE, 82, 140, 28, 4, temperature, fullRedraw);
+  if (fullRedraw) {
+    display.setTextDatum(MC_DATUM);
     display.setTextColor(TFT_WHITE, TFT_BLACK);
-    display.drawString("WLAN", 120, 190);
+    display.setTextFont(2);
+    display.drawString("frei", 120, 108);
   }
+  drawChangedText("S " + percentText(sessionLimit) + "%",
+                  sessionLimit.valid ? limitColor(sessionLimit.used) : TFT_WHITE,
+                  137, 160, 28, 4, session, fullRedraw);
+  drawChangedText("W " + percentText(weeklyLimit) + "%",
+                  weeklyLimit.valid ? limitColor(weeklyLimit.used) : TFT_WHITE,
+                  166, 130, 16, 2, weekly, fullRedraw);
+  // Schmale Zeile vollständig innerhalb des inneren Rings.
+  const String networkText = WiFi.status() == WL_CONNECTED
+      ? (config.showIp ? "IP " + WiFi.localIP().toString() : String()) : String("WLAN");
+  drawChangedText(networkText, TFT_WHITE, 185, 104, 12, 1, network, fullRedraw);
+  displayNeedsFullRedraw = false;
   displayDirty = false;
 }
 
 void handleTouch() {
+  if (!touchAvailable) return;
   const bool raw = digitalRead(Pins::TOUCH) == HIGH;
   const uint32_t now = millis();
   if (raw != touchRaw) {
@@ -565,6 +832,7 @@ void handleTouch() {
 }
 
 void handleLongTouch() {
+  if (!touchAvailable) return;
   if (!touchStable || touchLongHandled || millis() - touchPressedMs < Timing::TOUCH_RESET_MS) return;
   touchLongHandled = true;
   display.fillScreen(TFT_BLACK);
@@ -574,6 +842,7 @@ void handleLongTouch() {
   display.drawString("WLAN wird geloescht", 120, 105);
   display.setTextColor(TFT_WHITE, TFT_BLACK);
   display.drawString("Neustart ...", 120, 135);
+  drawDisplayName();
   WiFiManager manager;
   manager.resetSettings();
   delay(1000);
@@ -588,6 +857,16 @@ void connectWifi() {
   manager.setConfigPortalTimeout(300);
   manager.setConnectTimeout(20);
   manager.setBreakAfterConfig(false);
+  manager.setAPCallback([](WiFiManager *wifiManager) {
+    display.fillScreen(TFT_BLACK);
+    display.setTextDatum(MC_DATUM);
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setTextFont(2);
+    display.drawString("Setup", 120, 90);
+    display.drawString("SSID:", 120, 120);
+    display.drawString(wifiManager->getConfigPortalSSID(), 120, 150);
+    drawDisplayName();
+  });
   // Das Portal verwaltet bewusst nur WLAN. Claude-Daten werden später über /settings gepflegt.
   if (!manager.autoConnect(SETUP_AP, SETUP_AP_PASSWORD)) ESP.restart();
   WiFi.mode(WIFI_STA);  // Setup-AP nach erfolgreicher Anmeldung abschalten.
@@ -595,17 +874,30 @@ void connectWifi() {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(Pins::TOUCH, INPUT);
+  Serial.println();
+  Serial.printf("Claude Display Firmware %s\n", FIRMWARE_VERSION);
+  Serial.println("GC9A01: CLK=D5 MOSI=D7 DC=D4 RST=D0 CS=GND; SPI=10 MHz");
+  pinMode(Pins::TOUCH, INPUT_PULLUP);
+  delay(20);
+  touchAvailable = digitalRead(Pins::TOUCH) == LOW;
   LittleFS.begin();
   loadConfig();
 
   display.init();
   display.setRotation(0);
+  // Sichtbarer Selbsttest vor WLAN und Claude: benötigt keine Netzwerkverbindung.
+  Serial.println("Display-Selbsttest: Rot, Gruen, Blau, Weiss");
+  for (uint16_t color : {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE}) {
+    display.fillScreen(color);
+    delay(500);
+  }
   display.fillScreen(TFT_BLACK);
   display.setTextDatum(MC_DATUM);
   display.setTextColor(TFT_WHITE, TFT_BLACK);
   display.setTextFont(2);
   display.drawString("WLAN verbinden ...", 120, 120);
+  drawDisplayName();
+  Serial.println("Display initialisiert; WLAN-Verbindung startet");
 
   connectWifi();
   detectSensor();
