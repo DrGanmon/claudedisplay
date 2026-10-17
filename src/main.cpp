@@ -44,7 +44,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-17.14";
+constexpr char FIRMWARE_VERSION[] = "2026-10-17.15";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -240,6 +240,19 @@ void beginPage(const __FlashStringHelper *title) {
   web.sendContent(F("<p>Firmware: "));
   web.sendContent(FIRMWARE_VERSION);
   web.sendContent(F("</p>"));
+  web.sendContent(F("<p>Aktuelle Uhrzeit (Europe/Berlin): <time id='deviceClock' data-unix='"));
+  const time_t now = time(nullptr);
+  web.sendContent(String(now >= 1577836800 ? static_cast<uint32_t>(now) : 0));
+  web.sendContent(F("'>Uhrzeit noch nicht synchronisiert</time></p>"
+                    "<script>(()=>{const el=document.getElementById('deviceClock');"
+                    "let epoch=Number(el.dataset.unix),base=performance.now();"
+                    "const fmt=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',"
+                    "day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});"
+                    "function tick(){if(!epoch){el.textContent='Uhrzeit noch nicht synchronisiert';return;}"
+                    "const d=new Date(epoch*1000+performance.now()-base);el.textContent=fmt.format(d);el.dateTime=d.toISOString();}"
+                    "async function sync(){try{const r=await fetch('/api/time',{cache:'no-store'});if(!r.ok)return;"
+                    "const t=await r.json();epoch=t.clock_synced?t.unix_time:0;base=performance.now();tick();}catch(e){}}"
+                    "tick();setInterval(tick,1000);setInterval(sync,10000);})();</script>"));
 }
 
 void endPage() {
@@ -610,6 +623,18 @@ void setupWebServer() {
   web.on("/settings/name", HTTP_POST, handleSaveDisplayName);
   web.on("/settings/trueconf", HTTP_POST, handleSaveTrueConf);
   web.on("/settings/trueconf/test", HTTP_POST, handleTestTrueConf);
+  web.on("/api/time", HTTP_GET, []() {
+    const time_t now = time(nullptr);
+    JsonDocument doc;
+    doc["clock_synced"] = now >= 1577836800;
+    if (now >= 1577836800) doc["unix_time"] = static_cast<uint32_t>(now);
+    else doc["unix_time"] = nullptr;
+    doc["time_zone"] = "Europe/Berlin";
+    String body;
+    serializeJson(doc, body);
+    web.sendHeader("Cache-Control", "no-store");
+    web.send(200, "application/json", body);
+  });
   web.on("/settings/password", HTTP_POST, handleChangePassword);
   web.on("/settings/test", HTTP_POST, handleTestSessionKey);
   web.on("/update", HTTP_GET, handleUpdatePage);
