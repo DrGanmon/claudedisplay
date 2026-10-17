@@ -19,6 +19,7 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 - geschützte Konfigurationsseite für Claude-Zugang und Abrufintervall
 - direkter Abruf der Claude-Sitzungs- und Wochenlimits
 - automatische Ermittlung der Claude-Organisations-ID
+- optionaler TrueConf-Zähler für ungelesene Nachrichten, direkt per HTTPS/WSS ohne Vermittlungs-PC
 - Anzeige von Temperatur, Luftdruck und – mit BME280 – Luftfeuchtigkeit
 - Status-API im JSON-Format
 - passwortgeschütztes Firmwareupdate per Datei-Upload im Browser
@@ -39,7 +40,10 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 - übriger Ringanteil entspricht den verbrauchten Prozenten; seine Farbe geht mit steigendem Gesamtverbrauch stufenlos von Grau (`#808080` bei 0 %) zu kräftigem Rot (`#FF0000` bei 100 %) über
 - unbekannte Limits erscheinen als vollständig dunkelgrauer Ring
 - im normalen Betrieb nur geänderte Textzeilen und Ringsegmente aktualisieren; kleine Textpuffer vermeiden sichtbares Löschen vor dem Neuzeichnen
-- Mitte: Temperatur und freie Prozente für Sitzung (`S`) und Woche (`W`)
+- Mitte: Temperatur, freie Prozente und Reset-Countdowns für Sitzung (`S`) und Woche (`W`), zum Beispiel `S 75% 0 03:25`
+- Countdownformat: Tage, Stunden und Minuten (`D HH:mm`); ohne gültige Uhrzeit oder Reset-Angabe `-- --:--`, nach Ablauf `0 00:00`
+- kein zusätzlicher Text „frei“; optional `TC 5` für fünf ungelesene TrueConf-Nachrichten
+- alle Textflächen liegen mit mindestens zwei Pixeln Abstand innerhalb der inneren Ringkante; lange Texte werden verkleinert beziehungsweise auf ihre Textfläche begrenzt
 
 ### Bedienung des optionalen TTP223
 
@@ -116,7 +120,9 @@ Falls ein TTP223 angeschlossen ist, startet eine kurze Berührung eine sofortige
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.9`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.11`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+
+Version `2026-10-17.11` behebt vorzeitig abgeschnittene Einstellungsseiten bei leeren Konfigurationswerten. Leere Servernamen, Organisations-IDs oder andere optionale Textfelder dürfen keinen leeren HTTP-Chunk auslösen, da dieser die Antwort beendet. Der TrueConf-Abschnitt zeigt deshalb auch vor der ersten Konfiguration alle Felder und beide Buttons vollständig an.
 
 Beim Neustart zeigt das Display vor dem WLAN-Verbindungsaufbau jeweils eine halbe Sekunde Rot, Grün, Blau und Weiß. Dieser Selbsttest läuft unabhängig von WLAN, Sensoren und Claude. Bleiben auch diese Flächen unsichtbar, liegt das Problem vor der normalen Statusanzeige. Der SPI-Takt ist zur Fehlersuche auf 10 MHz reduziert. Der serielle Monitor mit 115200 Baud zeigt Firmwareversion, erwartete Display-Verdrahtung und den Start des Selbsttests; diese Meldungen bestätigen den Programmablauf, aber keine erfolgreiche Kommunikation mit dem Display.
 
@@ -135,6 +141,29 @@ Seit Version `2026-10-17.6` extrahiert die Firmware wie das PS1-Skript die erste
 Negative Fehlernummern stammen vom ESP8266-HTTPClient, nicht von Claude. `-4` bedeutet in der verwendeten Bibliothek „not connected“, bevor die HTTP-Antwort gelesen werden konnte. Seit Version `2026-10-17.4` verwenden Organisationssuche und Limit-Abruf einen TLS-Empfangspuffer von 16 KiB statt unbestätigt verkleinerter Puffer. HTTP/1.0 und `Accept-Encoding: identity` vermeiden Chunk-Framing beziehungsweise Kompression beim direkten JSON-Lesen aus dem Stream. Fehler zeigen den betroffenen Abruf, den HTTPClient-Fehlertext und bei Transportfehlern zusätzlich verfügbare TLS-Details und freien Heap. Erkannte Cloudflare-Challenges werden gesondert gemeldet.
 
 Hintergrund: [ESP8266-TLS-Puffer und MFLN](https://arduino-esp8266.readthedocs.io/en/latest/esp8266wifi/bearssl-client-secure-class.html#mfln-or-maximum-fragment-length-negotiation-saving-ram), [ArduinoJson mit HTTPClient](https://arduinojson.org/v7/how-to/use-arduinojson-with-httpclient/).
+
+### TrueConf-Nachrichtenzähler einrichten
+
+Der Zähler ist standardmäßig ausgeschaltet. Er verwendet die TrueConf-Bridge-Chat-API, nicht die administrative REST-Anrufverwaltung. Die Einrichtung erfolgt vollständig unter `/settings` im Abschnitt `TrueConf-Nachrichten`:
+
+1. `Zähler aktivieren` auswählen und den Server als DNS-Namen oder IPv4-Adresse ohne `https://` oder Pfad eintragen. Standardport für HTTPS und WSS ist `443`.
+2. Den Benutzernamen des Kontos eintragen, dessen ungelesene Nachrichten gezählt werden sollen, und dessen Passwort eingeben. Konten des lokalen TrueConf-Servers einschließlich unterstützter LDAP-Konten sind möglich. Ein separates Bot-Konto zeigt seine eigenen Nachrichten, nicht die eines anderen Benutzers.
+3. Den SHA1-Fingerprint des Serverzertifikats aus den Zertifikatdetails übernehmen (40 Hex-Zeichen, Doppelpunkte und Leerzeichen erlaubt). Nach einem Zertifikatwechsel muss dieser Wert aktualisiert werden. Die ausdrücklich als unsicher gekennzeichnete Checkbox erlaubt alternativ Verbindungen ohne Zertifikatsprüfung.
+4. Falls die Anmeldung über eine OAuth-Anwendung erfolgen soll, deren App-ID eintragen. Die Anwendung benötigt gemäß TrueConf `version:read` und die entsprechende Benutzeranmeldung. Die Firmware führt dann den dokumentierten dreistufigen Austausch vom REST-Token zum Bridge-JWT durch. Ohne App-ID verwendet sie die direkte Bridge-Passwortanmeldung. Reine interaktive MFA-/SSO-Anmeldungen kann der ESP nicht selbst bedienen.
+5. Alternativ einen vorhandenen **Bridge-JWT** eintragen. Dieser hat Vorrang vor Benutzer/Passwort und ist kein normaler REST-API-Bearer-Token. Ein abgelaufener manuell eingetragener JWT muss ersetzt oder über `Gespeicherten JWT löschen` entfernt werden, um wieder Benutzer/Passwort zu verwenden.
+6. Abrufintervall zwischen `30` und `3600` Sekunden einstellen (Standard `60`), `TrueConf-Einstellungen speichern` und danach `Gespeicherte TrueConf-Verbindung testen` drücken.
+
+Alle Einstellungen einschließlich Passwort und manuell eingetragenem JWT werden in LittleFS gespeichert und beim Neustart geladen. Leere Geheimnisfelder behalten den vorhandenen Wert; separate Checkboxen löschen Passwort beziehungsweise JWT. Die Firmware schreibt die Konfiguration zuerst vollständig in eine temporäre Datei und ersetzt anschließend die bisherige Datei. Geheimnisse erscheinen weder im HTML als Feldwerte noch in der Status-API.
+
+Für den direkten Zugriff muss TrueConf Web Manager erreichbar sein und `/bridge/api/` sowie `/websocket/chat_bot/` bereitstellen. Nach der Anmeldung fordert die Firmware über `getChats` jeweils drei Chats an und summiert deren `unreadMessages` über alle Seiten. Bei Erfolg erscheinen `TC <Anzahl>` auf dem Display sowie Anzahl und Status auf der Webseite und unter `/api/status`. Bei Fehlern steht auf dem Display `TC --`, kein irreführender Nullwert. Es werden keine Nachrichten gesendet, Chat-Verläufe angefordert oder Anrufdaten verarbeitet. Die Chat-Liste kann allerdings die letzte Nachricht enthalten; sie wird vom JSON-Filter verworfen und nicht angezeigt oder gespeichert.
+
+Die Anmeldung verwendet `receiveUnread: false` und `receiveSystemMessageEnvelopes: false`. Die Firmware sendet keine Bestätigungen für Chat-Ereignisse, weil diese laut TrueConf Nachrichten als gelesen markieren können. Das Zusammenspiel mit dem Lesestatus des normalen Clients muss beim ersten Test auf eurem Server geprüft werden. WebSocket-Ping/Pong ist davon unabhängig. Die Verbindung wird nach dem Zählen geschlossen; TrueConf- und Claude-TLS laufen nacheinander, um RAM zu sparen. Eine Antwort über 8 KiB, ein unvollständiger Abruf oder ein Zeitlimit ergibt einen Fehler statt einer Teilsumme. Während synchroner Netzwerkabrufe können Webseite und Display kurz pausieren.
+
+Quellen: [TrueConf-Anmeldung und WSS](https://trueconf.com/docs/chatbot-connector/en/connect-and-auth/), [Chat-Zähler, Seitenabruf und Gelesenbestätigungen](https://trueconf.com/docs/chatbot-connector/en/chats/).
+
+### Reset-Countdowns und Uhrzeit
+
+Die Firmware synchronisiert ihre Uhr nach der WLAN-Verbindung über NTP. Unter `Display-Einstellungen` kann ein im eigenen Netzwerk erreichbarer Zeitserver eingestellt und gespeichert werden; Standard ist `pool.ntp.org`. Die Zeitzone der Reset-Angabe wird berücksichtigt, der Countdown ist eine Dauer. Sekundenreste werden auf die nächste Minute aufgerundet. Ohne NTP-Synchronisierung wird kein scheinbar gültiger Countdown berechnet. Die Status-API enthält dafür `clock_synced`.
 
 - `/`: Klima-, Limit- und Gerätestatus
 - `/settings`: geschützte Claude- und Gerätekonfiguration

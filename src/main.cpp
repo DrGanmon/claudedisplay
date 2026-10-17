@@ -15,6 +15,10 @@
 #include <Adafruit_BME280.h>
 #include <Adafruit_BMP280.h>
 #include "org_id.h"
+#include "reset_time.h"
+#include "trueconf.h"
+#include "display_layout.h"
+#include <time.h>
 
 namespace Pins {
 constexpr uint8_t I2C_SDA = D2;
@@ -37,7 +41,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-17.9";
+constexpr char FIRMWARE_VERSION[] = "2026-10-17.11";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -50,12 +54,15 @@ struct Config {
   String userAgent = FIREFOX_WINDOWS_USER_AGENT;
   String webPassword = DEFAULT_WEB_PASSWORD;
   uint32_t intervalSec = 180;
+  TrueConfConfig trueConf;
+  String ntpServer = "pool.ntp.org";
 };
 
 struct LimitBucket {
   bool valid = false;
   float used = 0.0f;
   String resetsAt;
+  int64_t resetEpoch = -1;
 };
 
 Config config;
@@ -87,6 +94,9 @@ bool displayNeedsFullRedraw = true;
 bool updateAuthenticated = false;
 bool updateSuccessful = false;
 String updateError;
+TrueConfResult trueConfResult;
+uint32_t lastTrueConfMs = 0;
+bool forceTrueConfRefresh = false;
 
 bool touchRaw = false;
 bool touchStable = false;
@@ -109,6 +119,11 @@ String htmlEscape(const String &input) {
     }
   }
   return out;
+}
+
+void sendHtmlEscaped(const String &input) {
+  // Ein leerer HTTP-Chunk beendet die Antwort. Nur endPage() darf ihn senden.
+  if (input.length()) web.sendContent(htmlEscape(input));
 }
 
 String percentText(const LimitBucket &bucket, bool remaining = true) {
@@ -156,6 +171,17 @@ bool loadConfig() {
   if (config.userAgent == LEGACY_USER_AGENT) config.userAgent = FIREFOX_WINDOWS_USER_AGENT;
   config.webPassword = doc["webPassword"] | DEFAULT_WEB_PASSWORD;
   config.intervalSec = constrain(static_cast<uint32_t>(doc["intervalSec"] | 180), 60UL, 3600UL);
+  config.ntpServer = doc["ntpServer"] | "pool.ntp.org";
+  config.trueConf.enabled = doc["trueConf"]["enabled"] | false;
+  config.trueConf.host = doc["trueConf"]["host"] | "";
+  config.trueConf.port = doc["trueConf"]["port"] | 443;
+  config.trueConf.username = doc["trueConf"]["username"] | "";
+  config.trueConf.password = doc["trueConf"]["password"] | "";
+  config.trueConf.token = doc["trueConf"]["token"] | "";
+  config.trueConf.oauthClientId = doc["trueConf"]["oauthClientId"] | "";
+  config.trueConf.fingerprint = doc["trueConf"]["fingerprint"] | "";
+  config.trueConf.insecure = doc["trueConf"]["insecure"] | false;
+  config.trueConf.intervalSec = constrain(static_cast<uint32_t>(doc["trueConf"]["intervalSec"] | 60), 30UL, 3600UL);
   normalizeClaudeConfig();
   return true;
 }
@@ -170,11 +196,26 @@ bool saveConfig() {
   doc["userAgent"] = config.userAgent;
   doc["webPassword"] = config.webPassword;
   doc["intervalSec"] = config.intervalSec;
-  File file = LittleFS.open(CONFIG_FILE, "w");
+  doc["ntpServer"] = config.ntpServer;
+  doc["trueConf"]["enabled"] = config.trueConf.enabled;
+  doc["trueConf"]["host"] = config.trueConf.host;
+  doc["trueConf"]["port"] = config.trueConf.port;
+  doc["trueConf"]["username"] = config.trueConf.username;
+  doc["trueConf"]["password"] = config.trueConf.password;
+  doc["trueConf"]["token"] = config.trueConf.token;
+  doc["trueConf"]["oauthClientId"] = config.trueConf.oauthClientId;
+  doc["trueConf"]["fingerprint"] = config.trueConf.fingerprint;
+  doc["trueConf"]["insecure"] = config.trueConf.insecure;
+  doc["trueConf"]["intervalSec"] = config.trueConf.intervalSec;
+  // Erst vollständig in eine temporäre Datei schreiben, dann atomar ersetzen.
+  File file = LittleFS.open("/config.json.tmp", "w");
   if (!file) return false;
-  const bool ok = serializeJson(doc, file) > 0;
+  bool ok = serializeJson(doc, file) == measureJson(doc);
+  file.flush();
+  ok = ok && !file.getWriteError();
   file.close();
-  return ok;
+  if (!ok) { LittleFS.remove("/config.json.tmp"); return false; }
+  return LittleFS.rename("/config.json.tmp", CONFIG_FILE);
 }
 
 void beginPage(const __FlashStringHelper *title) {
@@ -220,16 +261,16 @@ void handleStatus() {
   web.sendContent(F(" %</b>"));
   if (sessionLimit.resetsAt.length()) {
     web.sendContent(F("<br>Sitzungs-Reset: "));
-    web.sendContent(htmlEscape(sessionLimit.resetsAt));
+    sendHtmlEscaped(sessionLimit.resetsAt);
   }
   if (weeklyLimit.resetsAt.length()) {
     web.sendContent(F("<br>Wochen-Reset: "));
-    web.sendContent(htmlEscape(weeklyLimit.resetsAt));
+    sendHtmlEscaped(weeklyLimit.resetsAt);
   }
   web.sendContent(F("</p><p>Status: "));
-  web.sendContent(htmlEscape(claudeState));
+  sendHtmlEscaped(claudeState);
   web.sendContent(F("<br>Letzte Aktualisierung: "));
-  web.sendContent(htmlEscape(lastClaudeUpdate));
+  sendHtmlEscaped(lastClaudeUpdate);
   web.sendContent(F("</p><form method='post' action='/refresh'><button>Jetzt aktualisieren</button></form></div>"));
   web.sendContent(F("<div class='card'><h2>Gerät</h2><p>IP: "));
   web.sendContent(WiFi.localIP().toString());
@@ -237,8 +278,43 @@ void handleStatus() {
   web.sendContent(String(WiFi.RSSI()));
   web.sendContent(F(" dBm<br>Freier Heap: "));
   web.sendContent(String(ESP.getFreeHeap()));
-  web.sendContent(F(" Bytes</p></div>"));
+  web.sendContent(F(" Bytes</p></div><div class='card'><h2>TrueConf</h2><p>Ungelesene Nachrichten: "));
+  web.sendContent(trueConfResult.valid ? String(trueConfResult.unread) : String("--"));
+  web.sendContent(F("<br>Status: "));
+  sendHtmlEscaped(trueConfResult.state);
+  web.sendContent(F("</p></div>"));
   endPage();
+}
+
+void sendTrueConfSettings() {
+  web.sendContent(F("<div class='card'><h2>TrueConf-Nachrichten</h2><form method='post' action='/settings/trueconf'>"
+                    "<label><input type='checkbox' style='width:auto' name='enabled' "));
+  if (config.trueConf.enabled) web.sendContent(F("checked "));
+  web.sendContent(F("> Zähler aktivieren</label><label>Server (DNS-Name oder IPv4, ohne https://)<input name='host' maxlength='253' value='"));
+  sendHtmlEscaped(config.trueConf.host);
+  web.sendContent(F("'></label><label>HTTPS/WSS-Port<input type='number' name='port' min='1' max='65535' required value='"));
+  web.sendContent(String(config.trueConf.port));
+  web.sendContent(F("'></label><label>TrueConf-Benutzername<input name='username' maxlength='254' autocomplete='username' value='"));
+  sendHtmlEscaped(config.trueConf.username);
+  web.sendContent(F("'></label><label>TrueConf-Passwort (leer = beibehalten)<input type='password' name='password' autocomplete='new-password'></label>"
+                    "<label>Bridge-JWT (optional; hat Vorrang vor Benutzer/Passwort)<input type='password' name='token' autocomplete='new-password' placeholder='"));
+  web.sendContent(config.trueConf.token.length() ? "gespeichert; leer = beibehalten" : "nicht gespeichert");
+  web.sendContent(F("'></label><label><input type='checkbox' style='width:auto' name='clearToken'> Gespeicherten JWT löschen</label>"
+                    "<label><input type='checkbox' style='width:auto' name='clearPassword'> Gespeichertes TrueConf-Passwort löschen</label>"
+                    "<label>OAuth-App-ID (optional; für Anmeldung über REST-Token-Austausch, Recht version:read)<input name='oauthClientId' maxlength='254' value='"));
+  sendHtmlEscaped(config.trueConf.oauthClientId);
+  web.sendContent(F("'></label><label>SHA1-Fingerprint des Serverzertifikats (40 Hex-Zeichen)<input name='fingerprint' maxlength='80' value='"));
+  sendHtmlEscaped(config.trueConf.fingerprint);
+  web.sendContent(F("'></label><label><input type='checkbox' style='width:auto' name='insecure' "));
+  if (config.trueConf.insecure) web.sendContent(F("checked "));
+  web.sendContent(F("> Zertifikatsprüfung ausschalten (unsicher)</label>"
+                    "<label>Abrufintervall in Sekunden (30–3600)<input type='number' name='intervalSec' min='30' max='3600' required value='"));
+  web.sendContent(String(config.trueConf.intervalSec));
+  web.sendContent(F("'></label><p>Passwort und JWT werden auf dem Gerät gespeichert. Es werden nur Chat-Zähler abgefragt; keine Gelesenbestätigungen gesendet.</p>"
+                    "<button type='submit'>TrueConf-Einstellungen speichern</button></form>"
+                    "<form method='post' action='/settings/trueconf/test'><button type='submit'>Gespeicherte TrueConf-Verbindung testen</button></form><p>Status: "));
+  sendHtmlEscaped(trueConfResult.state);
+  web.sendContent(F("</p></div>"));
 }
 
 void handleSettings() {
@@ -246,10 +322,13 @@ void handleSettings() {
   beginPage(F("Einstellungen"));
   web.sendContent(F("<div class='card'><h2>Display-Einstellungen</h2><form method='post' action='/settings/name'>"
                     "<label>Name auf dem Display<input name='displayName' maxlength='24' required value='"));
-  web.sendContent(htmlEscape(config.displayName));
+  sendHtmlEscaped(config.displayName);
   web.sendContent(F("'></label><label><input type='checkbox' name='showIp' value='1' style='width:auto' "));
   if (config.showIp) web.sendContent(F("checked "));
   web.sendContent(F("> IP-Adresse auf dem Display anzeigen</label>"
+                    "<label>NTP-Zeitserver für Reset-Countdowns<input name='ntpServer' maxlength='253' required value='"));
+  sendHtmlEscaped(config.ntpServer);
+  web.sendContent(F("'></label>"
                     "<button type='submit'>Display-Einstellungen speichern</button></form></div>"
                     "<div class='card'><h2>Claude-Zugang</h2><form method='post' action='/settings/test'>"
                     "<button type='submit'>Gespeicherten Session-Key testen</button></form>"
@@ -259,13 +338,13 @@ void handleSettings() {
                     "<label>Claude sessionKey<input type='password' name='sessionKey' autocomplete='new-password' placeholder='"));
   web.sendContent(config.sessionKey.length() ? "gespeichert" : "nicht gespeichert");
   web.sendContent(F("'></label><label>Organisations-ID<input name='orgId' value='"));
-  web.sendContent(htmlEscape(config.orgId));
+  sendHtmlEscaped(config.orgId);
   web.sendContent(F("'></label><label>Weitere Cookies (optional)<input type='password' name='extraCookies' placeholder='"));
   web.sendContent(config.extraCookies.length() ? "gespeichert" : "z. B. cf_clearance=..." );
   web.sendContent(F("'></label><label>User-Agent<input id='userAgent' name='userAgent' value='"));
-  web.sendContent(htmlEscape(config.userAgent));
+  sendHtmlEscaped(config.userAgent);
   web.sendContent(F("'></label><button type='button' data-user-agent='"));
-  web.sendContent(htmlEscape(FIREFOX_WINDOWS_USER_AGENT));
+  sendHtmlEscaped(FIREFOX_WINDOWS_USER_AGENT);
   web.sendContent(F("' onclick=\"document.getElementById('userAgent').value=this.dataset.userAgent\">Firefox unter Windows einsetzen</button>"
                     "<p>Danach die Claude-Einstellungen speichern. Bei zusätzlichen Browser-Cookies den exakten User-Agent dieses Browsers eintragen.</p>"
                     "<label>Abrufintervall in Sekunden (60–3600)<input type='number' min='60' max='3600' name='intervalSec' value='"));
@@ -280,13 +359,14 @@ void handleSettings() {
                     "<button type='submit'>Passwort ändern</button></form></div>"
                     "<div class='card'><p>Benutzername der Einstellungsseite: <b>admin</b></p>"
                     "<p>Falls ein TTP223 angeschlossen ist: mindestens 5 Sekunden berühren, um WLAN neu einzurichten.</p></div>"));
+  sendTrueConfSettings();
   endPage();
 }
 
 void settingsResult(const String &message) {
   beginPage(F("Einstellungen"));
   web.sendContent(F("<div class='card'><p role='status'>"));
-  web.sendContent(htmlEscape(message));
+  sendHtmlEscaped(message);
   web.sendContent(F("</p><a href='/settings'>Zurück zu den Einstellungen</a></div>"));
   endPage();
 }
@@ -301,16 +381,79 @@ void handleSaveDisplayName() {
   }
   const String previous = config.displayName;
   const bool previousShowIp = config.showIp;
+  const String previousNtp = config.ntpServer;
+  String ntp = web.arg("ntpServer");
+  ntp.trim();
+  if (!ntp.length() || ntp.length() > 253 || ntp.indexOf('/') >= 0 || ntp.indexOf(' ') >= 0) {
+    settingsResult("Bitte einen gültigen NTP-Servernamen eingeben.");
+    return;
+  }
   config.displayName = name;
   config.showIp = web.hasArg("showIp");
+  config.ntpServer = ntp;
   if (!saveConfig()) {
     config.displayName = previous;
     config.showIp = previousShowIp;
+    config.ntpServer = previousNtp;
     settingsResult("Display-Einstellungen konnten nicht gespeichert werden.");
     return;
   }
   displayDirty = true;
+  configTime(0, 0, config.ntpServer.c_str());
   settingsResult("Display-Einstellungen gespeichert. Die Anzeige wird sofort aktualisiert.");
+}
+
+void handleSaveTrueConf() {
+  if (!requireSettingsAuth()) return;
+  TrueConfConfig next = config.trueConf;
+  next.enabled = web.hasArg("enabled");
+  next.host = web.arg("host"); next.host.trim();
+  const long port = web.arg("port").toInt();
+  const long interval = web.arg("intervalSec").toInt();
+  if (port < 1 || port > 65535 || interval < 30 || interval > 3600) {
+    settingsResult("TrueConf-Port oder Intervall außerhalb des gültigen Bereichs."); return;
+  }
+  next.port = port;
+  next.intervalSec = interval;
+  next.username = web.arg("username"); next.username.trim();
+  next.oauthClientId = web.arg("oauthClientId"); next.oauthClientId.trim();
+  next.fingerprint = web.arg("fingerprint"); next.fingerprint.trim();
+  next.insecure = web.hasArg("insecure");
+  if (web.hasArg("clearPassword")) next.password = "";
+  if (web.arg("password").length()) next.password = web.arg("password");
+  if (web.hasArg("clearToken")) next.token = "";
+  if (web.arg("token").length()) { next.token = web.arg("token"); next.token.trim(); }
+  if (next.host.length() > 253 || next.username.length() > 254 || next.oauthClientId.length() > 254 ||
+      next.password.length() > 512 || next.token.length() > 4096 || next.fingerprint.length() > 80) {
+    settingsResult("TrueConf-Eingabe zu lang."); return;
+  }
+  const String error = validateTrueConfConfig(next);
+  if (error.length()) { settingsResult(error); return; }
+  const TrueConfConfig previous = config.trueConf;
+  config.trueConf = next;
+  if (!saveConfig()) {
+    config.trueConf = previous;
+    settingsResult("TrueConf-Einstellungen konnten nicht gespeichert werden."); return;
+  }
+  trueConfResult = TrueConfResult();
+  trueConfResult.state = next.enabled ? "Warte auf Abruf" : "Deaktiviert";
+  forceTrueConfRefresh = next.enabled;
+  displayDirty = true;
+  settingsResult("TrueConf-Einstellungen dauerhaft gespeichert.");
+}
+
+void refreshTrueConf() {
+  trueConfResult = fetchTrueConfUnread(config.trueConf);
+  lastTrueConfMs = millis();
+  forceTrueConfRefresh = false;
+  displayDirty = true;
+}
+
+void handleTestTrueConf() {
+  if (!requireSettingsAuth()) return;
+  refreshTrueConf();
+  settingsResult(trueConfResult.valid ? "TrueConf verbunden. Ungelesene Nachrichten: " + String(trueConfResult.unread)
+                                     : "TrueConf-Test: " + trueConfResult.state);
 }
 
 void handleChangePassword() {
@@ -456,6 +599,8 @@ void setupWebServer() {
   web.on("/settings", HTTP_GET, handleSettings);
   web.on("/settings", HTTP_POST, handleSaveSettings);
   web.on("/settings/name", HTTP_POST, handleSaveDisplayName);
+  web.on("/settings/trueconf", HTTP_POST, handleSaveTrueConf);
+  web.on("/settings/trueconf/test", HTTP_POST, handleTestTrueConf);
   web.on("/settings/password", HTTP_POST, handleChangePassword);
   web.on("/settings/test", HTTP_POST, handleTestSessionKey);
   web.on("/update", HTTP_GET, handleUpdatePage);
@@ -482,6 +627,10 @@ void setupWebServer() {
       doc["seven_day"]["resets_at"] = weeklyLimit.resetsAt;
     }
     doc["claude_state"] = claudeState;
+    doc["clock_synced"] = time(nullptr) >= 1577836800;
+    doc["trueconf"]["enabled"] = config.trueConf.enabled;
+    doc["trueconf"]["state"] = trueConfResult.state;
+    if (trueConfResult.valid) doc["trueconf"]["unread"] = trueConfResult.unread;
     doc["free_heap"] = ESP.getFreeHeap();
     String body;
     serializeJson(doc, body);
@@ -602,6 +751,7 @@ void readBucket(JsonObjectConst root, const char *key, LimitBucket &bucket) {
   }
   bucket.used = constrain(value["utilization"].as<float>(), 0.0f, 100.0f);
   bucket.resetsAt = value["resets_at"] | "";
+  bucket.resetEpoch = parseResetTimestamp(bucket.resetsAt.c_str());
   bucket.valid = true;
 }
 
@@ -749,9 +899,11 @@ struct TextDrawState {
   uint16_t color = TFT_WHITE;
 };
 
-void drawChangedText(const String &text, uint16_t color, int y, int width, int height,
-                     uint8_t font, TextDrawState &previous, bool fullRedraw) {
+void drawChangedText(const String &text, uint16_t color, const DisplayLayout::TextArea &area,
+                     TextDrawState &previous, bool fullRedraw) {
   if (!fullRedraw && text == previous.text && color == previous.color) return;
+  const int y = area.y, width = area.width, height = area.height;
+  const uint8_t font = area.font;
   // Nur eine kleine Textzeile puffern; kein 240x240-Vollbild im ESP8266-RAM.
   TFT_eSprite row(&display);
   row.setColorDepth(16);
@@ -784,31 +936,32 @@ void drawChangedText(const String &text, uint16_t color, int y, int width, int h
 
 void drawDisplay() {
   static RingDrawState sessionRing, weeklyRing;
-  static TextDrawState name, temperature, session, weekly, network;
+  static TextDrawState name, temperature, session, weekly, network, trueConf;
   const bool fullRedraw = displayNeedsFullRedraw;
   if (fullRedraw) display.fillScreen(TFT_BLACK);
 
   drawLimitRing(119, 15, sessionLimit, sessionRing, fullRedraw);
   drawLimitRing(98, 7, weeklyLimit, weeklyRing, fullRedraw);
-  drawChangedText(config.displayName, TFT_WHITE, 58, 112, 16, 2, name, fullRedraw);
+  drawChangedText(config.displayName, TFT_WHITE, DisplayLayout::NAME, name, fullRedraw);
   const String temperatureText = isnan(temperatureC) ? "--.- C" : String(temperatureC, 1) + " C";
-  drawChangedText(temperatureText, TFT_WHITE, 82, 140, 28, 4, temperature, fullRedraw);
-  if (fullRedraw) {
-    display.setTextDatum(MC_DATUM);
-    display.setTextColor(TFT_WHITE, TFT_BLACK);
-    display.setTextFont(2);
-    display.drawString("frei", 120, 108);
-  }
-  drawChangedText("S " + percentText(sessionLimit) + "%",
+  drawChangedText(temperatureText, TFT_WHITE, DisplayLayout::TEMPERATURE, temperature, fullRedraw);
+  char sessionReset[24], weeklyReset[24];
+  const int64_t now = static_cast<int64_t>(time(nullptr));
+  formatResetRemaining(sessionLimit.valid ? sessionLimit.resetEpoch : -1, now, sessionReset, sizeof(sessionReset));
+  formatResetRemaining(weeklyLimit.valid ? weeklyLimit.resetEpoch : -1, now, weeklyReset, sizeof(weeklyReset));
+  drawChangedText("S " + percentText(sessionLimit) + "% " + sessionReset,
                   sessionLimit.valid ? limitColor(sessionLimit.used) : TFT_WHITE,
-                  137, 160, 28, 4, session, fullRedraw);
-  drawChangedText("W " + percentText(weeklyLimit) + "%",
+                  DisplayLayout::SESSION, session, fullRedraw);
+  drawChangedText("W " + percentText(weeklyLimit) + "% " + weeklyReset,
                   weeklyLimit.valid ? limitColor(weeklyLimit.used) : TFT_WHITE,
-                  166, 130, 16, 2, weekly, fullRedraw);
+                  DisplayLayout::WEEKLY, weekly, fullRedraw);
+  const String trueConfText = !config.trueConf.enabled ? String() : "TC " +
+      (trueConfResult.valid ? String(trueConfResult.unread) : String("--"));
+  drawChangedText(trueConfText, TFT_WHITE, DisplayLayout::TRUECONF, trueConf, fullRedraw);
   // Schmale Zeile vollständig innerhalb des inneren Rings.
   const String networkText = WiFi.status() == WL_CONNECTED
       ? (config.showIp ? "IP " + WiFi.localIP().toString() : String()) : String("WLAN");
-  drawChangedText(networkText, TFT_WHITE, 185, 104, 12, 1, network, fullRedraw);
+  drawChangedText(networkText, TFT_WHITE, DisplayLayout::NETWORK, network, fullRedraw);
   displayNeedsFullRedraw = false;
   displayDirty = false;
 }
@@ -900,10 +1053,12 @@ void setup() {
   Serial.println("Display initialisiert; WLAN-Verbindung startet");
 
   connectWifi();
+  configTime(0, 0, config.ntpServer.c_str());
   detectSensor();
   readSensor();
   setupWebServer();
   forceClaudeRefresh = true;
+  forceTrueConfRefresh = config.trueConf.enabled;
   drawDisplay();
 }
 
@@ -932,8 +1087,12 @@ void loop() {
     fetchClaudeUsage();
   }
 
-  if (displayDirty && now - lastDisplayMs >= Timing::DISPLAY_MS) {
-    lastDisplayMs = now;
+  if (config.trueConf.enabled && (forceTrueConfRefresh ||
+      millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL)) refreshTrueConf();
+
+  // Auch Countdown und Netzstatus prüfen; unveränderte Textzeilen erzeugen keine SPI-Ausgabe.
+  if (millis() - lastDisplayMs >= Timing::DISPLAY_MS) {
+    lastDisplayMs = millis();
     drawDisplay();
   }
   yield();
