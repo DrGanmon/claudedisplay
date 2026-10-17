@@ -44,7 +44,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-17.15";
+constexpr char FIRMWARE_VERSION[] = "2026-10-17.16";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -1069,13 +1069,13 @@ void connectWifi(bool trySavedWifi = true) {
 }
 
 void handleWifiRecovery() {
-  if (wifiPortal) wifiPortal->process();
+  if (wifiPortal) processWifiPortalIfRunning(*wifiPortal);
   const uint32_t now = millis();
   const bool connected = WiFi.status() == WL_CONNECTED;
   const bool fallbackDue = wifiRecovery.needsPortal(connected, now);
   if (connected) {
     if (wifiPortal) {
-      wifiPortal->stopConfigPortal();
+      stopWifiPortalIfRunning(*wifiPortal);
       wifiPortal.reset();
       WiFi.mode(WIFI_STA);
       displayNeedsFullRedraw = true;
