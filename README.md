@@ -130,7 +130,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.2`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.3`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -181,6 +181,12 @@ Die letzten Mess- und API-Werte, Einstellungen sowie kleine Navigations- und Rin
 Ab `2026-10-19.9` passen die Claude- und Wetterseite farblich zusammen: Der äußere Sessionring ist honigfarben, der innere Wochenring salbeifarben. Verbrauchte Anteile bleiben ab `2026-10-19.11` bis einschließlich 50 % Verbrauch grau. Von 50 bis 75 % geht die Spur stufenlos in Cremegelb über, von 75 bis 100 % weiter in Cremerot. Erst bei 100 % ist Cremerot vollständig erreicht. Bei neuen Werten folgt die Spurfarbe der sanften Ringbewegung. Ohne gültige Limitdaten bleibt die Spur grau. Ab 75 % Verbrauch gehen die verbleibenden Anteile sanft in Apricot über. Name und die größere Uhr (`HH:MM`) erscheinen cremefarben, Sensortemperatur und Reset-Countdowns zurückhaltender. Session und Woche erhalten jeweils eine eigene kleine Countdownzeile.
 
 Neue Limitwerte bewegen die Ringe schrittweise zum Ziel (höchstens 25 Aktualisierungen/s); bei späteren Seitenwechseln erscheinen die gespeicherten Werte sofort. Beim ersten Anzeigen gültiger Werte nach dem Start füllt sich jeder Ring dagegen über 5 Sekunden mit sanftem Anlauf und Ausklang bis zum tatsächlichen Restkontingent. Ein Seitenwechsel pausiert diese erste Animation; beim Zurückkehren läuft sie weiter. Die Prozent- und Countdowntexte zeigen bereits die tatsächlichen Werte. TrueConf- und Wetter-Hintergrundabfragen warten während dieser ersten Füllanimation. Der frühere Rot-Grün-Blau-Weiß-Selbsttest samt zwei Sekunden Wartezeit entfällt ab `2026-10-19.13`; nach der Displayinitialisierung erscheint direkt die Verbindungsanzeige. Im Ruhezustand werden unveränderte Ringe nicht neu gezeichnet. Es wird kein zusätzlicher Bildpuffer angelegt. Bei deaktiviertem TrueConf zeigt die untere Statuszeile `Verbunden` oder `Claude pruefen`, sonst weiterhin den TC-Zähler. Die optionale IP-Adresse steht darunter ohne Präfix, damit sie vollständig in den Kreis passt. Ausführliche Fehlermeldungen stehen auf der Webseite.
+
+### Sanfter Seitenwechsel
+
+Ab `2026-10-20.3` schließt sich beim Wechsel per Tap oder Doppeltap eine kreisförmige schwarze Blende zur Mitte. Anschließend öffnet sie sich wieder auf der neuen Seite. Das gilt auch für die Rückkehr von der Statusseite. Die Sollzeit beträgt rund 560 ms; die tatsächliche Dauer hängt von der Zeichenzeit am Gerät ab.
+
+Die Blende nutzt keinen zweiten Bildschirmpuffer und liest keine Pixel vom Display zurück. Beim Schließen werden nur neu verdeckte Bereiche gelöscht. Beim Öffnen werden die neu sichtbaren Kreisstreifen mit Viewport-Clipping nachgezeichnet; Textflächen außerhalb des Ausschnitts werden übersprungen. Der gemeinsame Textcache bleibt erhalten. Automatische API-Abfragen warten bis zum Ende des Übergangs; manuelle Claude-/TrueConf-Anforderungen werden vorgemerkt. Weitere kurze Taps während der Blende werden ignoriert, der lange WLAN-Reset bleibt verfügbar. Die normale Wetter-, Ring- oder WLAN-Animation läuft nach der Blende weiter. Verhalten und Flüssigkeit müssen zusätzlich am Gerät geprüft werden.
 
 ### Statusseite per Doppeltap
 
@@ -293,8 +299,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-20.2
-git push origin v2026-10-20.2
+git tag v2026-10-20.3
+git push origin v2026-10-20.3
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

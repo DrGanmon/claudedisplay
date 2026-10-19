@@ -25,6 +25,7 @@
 #include "weather_animation.h"
 #include "touch_input.h"
 #include "display_pages.h"
+#include "page_transition.h"
 #include "tls_memory.h"
 #include "limit_ring_color.h"
 #include "ring_startup.h"
@@ -56,7 +57,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-20.2";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.3";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -125,6 +126,8 @@ uint32_t webServerReadyMs = 0;
 
 WeatherResult weather;
 DisplayPages pages;
+PageTransition pageTransition;
+bool transitionRendering = false;
 bool forceWeatherRefresh = true;
 uint32_t lastWeatherMs = 0;
 
@@ -519,7 +522,7 @@ void handleSaveTrueConf() {
 }
 
 void refreshTrueConf() {
-  if (pages.requestsPaused()) { forceTrueConfRefresh = true; return; }
+  if (pageTransition.active() || pages.requestsPaused()) { forceTrueConfRefresh = true; return; }
   trueConfResult = fetchTrueConfUnread(config.trueConf);
   lastTrueConfMs = millis();
   forceTrueConfRefresh = false;
@@ -528,9 +531,9 @@ void refreshTrueConf() {
 
 void handleTestTrueConf() {
   if (!requireSettingsAuth()) return;
-  if (pages.requestsPaused()) {
+  if (pageTransition.active() || pages.requestsPaused()) {
     forceTrueConfRefresh = true;
-    settingsResult(F("TrueConf-Abfragen sind auf der Wetter- oder Statusseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
+    settingsResult(F("TrueConf-Abfragen sind waehrend Seitenwechsel sowie auf Wetter- und Statusseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
     return;
   }
   refreshTrueConf();
@@ -563,9 +566,9 @@ void fetchClaudeUsage();
 
 void handleTestSessionKey() {
   if (!requireSettingsAuth()) return;
-  if (pages.requestsPaused()) {
+  if (pageTransition.active() || pages.requestsPaused()) {
     forceClaudeRefresh = true;
-    settingsResult(F("Claude-Abfragen sind auf der Wetter- oder Statusseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
+    settingsResult(F("Claude-Abfragen sind waehrend Seitenwechsel sowie auf Wetter- und Statusseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
     return;
   }
   forceClaudeRefresh = true;
@@ -893,7 +896,7 @@ void readBucket(JsonObjectConst root, const char *key, LimitBucket &bucket) {
 }
 
 void fetchClaudeUsage() {
-  if (pages.requestsPaused()) { forceClaudeRefresh = true; return; }
+  if (pageTransition.active() || pages.requestsPaused()) { forceClaudeRefresh = true; return; }
   normalizeClaudeConfig();
   if (WiFi.status() != WL_CONNECTED || !config.sessionKey.length()) {
     claudeState = config.sessionKey.length() ? "WLAN getrennt" : "sessionKey fehlt";
@@ -1075,6 +1078,7 @@ void drawChangedText(const String &text, uint16_t color, const DisplayLayout::Te
                      TextDrawState &previous, bool fullRedraw) {
   if (!fullRedraw && text == previous.text && color == previous.color) return;
   const int y = area.y, width = area.width, height = area.height;
+  if (!display.checkViewport(120 - width / 2, y - height / 2, width, height)) return;
   const uint8_t font = area.font;
   // Nur eine kleine Textzeile puffern; kein 240x240-Vollbild im ESP8266-RAM.
   TFT_eSprite row(&display);
@@ -1128,7 +1132,8 @@ void drawWeatherDisplay() {
     }
     display.drawFastHLine(93, 159, 54, WeatherTheme::FRAME);
   }
-  weatherAnimation.draw(weather.valid ? weather.code : -1, millis(), full);
+  if (display.checkViewport(88, 58, 64, 44))
+    weatherAnimation.draw(weather.valid ? weather.code : -1, millis(), full);
   drawChangedText("Draussen", WeatherTheme::HONEY, DisplayLayout::WEATHER_TITLE, title, full);
   drawChangedText(config.weatherName, WeatherTheme::CREAM, DisplayLayout::WEATHER_LOCATION, location, full);
   drawChangedText(weather.valid ? String(weather.temperature, 1) + " C" : "--.- C",
@@ -1227,6 +1232,7 @@ void drawWifiConnecting(bool force = false) {
 }
 
 void drawDisplay() {
+  if (pageTransition.active() && !transitionRendering) return;
   if (WiFi.status() != WL_CONNECTED && !pages.status()) { drawWifiConnecting(); return; }
   if (pages.status()) { drawStatusDisplay(); return; }
   if (pages.weather()) { drawWeatherDisplay(); return; }
@@ -1282,6 +1288,49 @@ void drawDisplay() {
   displayDirty = false;
 }
 
+void drawPageTransition() {
+  static int previousRadius = 172;
+  const PageTransition::Frame frame = pageTransition.update(millis());
+  if (!frame.ready) return;
+  display.resetViewport();
+  if (!frame.opening || frame.switchPage) {
+    const int radius = frame.switchPage ? 0 : frame.radius;
+    for (int y = 0; y < 240; y += 4) {
+      const int oldHalf = PageTransition::halfWidth(previousRadius, y);
+      const int half = PageTransition::halfWidth(radius, y);
+      if (oldHalf > half) {
+        display.fillRect(120 - oldHalf, y, oldHalf - half, 4, TFT_BLACK);
+        display.fillRect(120 + half, y, oldHalf - half, 4, TFT_BLACK);
+      }
+    }
+    previousRadius = radius;
+  }
+  if (frame.opening) {
+    transitionRendering = true;
+    // Reveal only the newly exposed crescents. The existing display GRAM holds
+    // the image; clipped redraws require no second framebuffer or readback pin.
+    for (int y = 0; y < 240; y += 4) {
+      const int oldHalf = PageTransition::halfWidth(previousRadius, y);
+      const int newHalf = PageTransition::halfWidth(frame.radius, y);
+      if (newHalf <= oldHalf) continue;
+      const auto reveal = [&](int x, int width) {
+        display.setViewport(x, y, width, 4, false);
+        displayNeedsFullRedraw = true;
+        drawDisplay();
+      };
+      if (!oldHalf) reveal(120 - newHalf, newHalf * 2);
+      else {
+        reveal(120 - newHalf, newHalf - oldHalf);
+        reveal(120 + oldHalf, newHalf - oldHalf);
+      }
+      yield();
+    }
+    transitionRendering = false;
+    previousRadius = frame.radius;
+  }
+  display.resetViewport();
+}
+
 void handleTouch() {
   static bool wasArmed = false, wasPressed = false;
   const bool rawPressed = digitalRead(Pins::TOUCH) == HIGH;
@@ -1291,7 +1340,7 @@ void handleTouch() {
     Serial.println(touchInput.isPressed() ? F("Touch: gedrueckt (HIGH)") : F("Touch: losgelassen (LOW)"));
   wasArmed = touchInput.isArmed();
   wasPressed = touchInput.isPressed();
-  if (pages.update(event, rawPressed || touchInput.isPressed(), millis())) {
+  if (!pageTransition.active() && pages.update(event, rawPressed || touchInput.isPressed(), millis())) {
     if (pages.requestsPaused()) {
       sessionRing.startup.pause();
       weeklyRing.startup.pause();
@@ -1300,7 +1349,7 @@ void handleTouch() {
     displayNeedsFullRedraw = true;
     Serial.println(pages.status() ? F("Touch: Statusseite") :
                    (pages.weather() ? F("Touch: Wetterseite") : F("Touch: Claude-Seite")));
-    drawDisplay();
+    pageTransition.start(millis());
   }
   if (event == TouchInput::Event::LONG_PRESS) touchResetRequested = true;
 }
@@ -1448,17 +1497,17 @@ void loop() {
   const uint32_t intervalMs = max(Timing::CLAUDE_MIN_MS, configuredIntervalMs);
   // Fällige Abrufe und manuelle Anforderungen auf Wetter-/Statusseite behalten.
   // Beim Zurückwechseln greifen die bisherigen Intervalle automatisch wieder.
-  if (WiFi.status() == WL_CONNECTED && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && (forceClaudeRefresh || now - lastClaudeMs >= intervalMs)) {
+  if (!pageTransition.active() && WiFi.status() == WL_CONNECTED && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && (forceClaudeRefresh || now - lastClaudeMs >= intervalMs)) {
     forceClaudeRefresh = false;
     lastClaudeMs = now;
     fetchClaudeUsage();
   }
 
-  if (WiFi.status() == WL_CONNECTED && !claudeStartupActive() && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && config.trueConf.enabled && (forceTrueConfRefresh ||
+  if (!pageTransition.active() && WiFi.status() == WL_CONNECTED && !claudeStartupActive() && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && config.trueConf.enabled && (forceTrueConfRefresh ||
       (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
        millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
 
-  if (!claudeStartupActive() && !pages.status() && !pages.tapPending() && !touchInput.isPressed() &&
+  if (!pageTransition.active() && !claudeStartupActive() && !pages.status() && !pages.tapPending() && !touchInput.isPressed() &&
       WiFi.status() == WL_CONNECTED && config.weatherName.length() &&
       (forceWeatherRefresh || millis() - lastWeatherMs >= 900000UL)) {
     forceWeatherRefresh = false;
@@ -1469,11 +1518,12 @@ void loop() {
   }
 
   // Auch Countdown und Netzstatus prüfen; unveränderte Textzeilen erzeugen keine SPI-Ausgabe.
-  if (millis() - lastDisplayMs >= Timing::DISPLAY_MS) {
+  if (!pageTransition.active() && millis() - lastDisplayMs >= Timing::DISPLAY_MS) {
     lastDisplayMs = millis();
     drawDisplay();
   }
-  if (!updateAuthenticated) {
+  if (!updateAuthenticated && pageTransition.active()) drawPageTransition();
+  else if (!updateAuthenticated) {
     if (WiFi.status() != WL_CONNECTED) {
       if (!pages.status()) drawWifiConnecting();
     }
