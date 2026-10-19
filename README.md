@@ -49,6 +49,8 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 
 ### Bedienung des optionalen TTP223
 
+Der TTP223 muss im Modus „aktiv HIGH, Tasterbetrieb“ arbeiten. Nach dem Start wartet die Firmware auf einen stabilen LOW-Ruhezustand und erkennt anschließend Berührungen fortlaufend. Ein HIGH während der Einschaltkalibrierung deaktiviert den Eingang nicht mehr dauerhaft. Seitenwechsel werden im seriellen Monitor als `Touch: Wetterseite` beziehungsweise `Touch: Claude-Seite` protokolliert. Während synchroner Netzwerkabrufe kann die Erkennung verzögert sein; sehr kurze Berührungen können dabei übersehen werden.
+
 - falls angeschlossen, kurz berühren: zwischen Claude-Anzeige und Wetterseite wechseln
 - falls angeschlossen, mindestens fünf Sekunden berühren: WLAN-Zugangsdaten löschen und ESP8266 neu starten
 - nach dem Neustart öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs
@@ -118,11 +120,11 @@ Alle Komponenten müssen eine gemeinsame Masse besitzen. Die Signale des ESP8266
 7. `Claude-Einstellungen und Session-Key speichern` drücken. Anschließend unter Einstellungen mit `Gespeicherten Session-Key testen` die Verbindung prüfen. Der Test zeigt das Ergebnis an und aktualisiert bei Erfolg die Claude-Limits.
 8. Im Abschnitt `Web-Passwort ändern` das aktuelle Passwort und zweimal das neue Passwort (mindestens 8 Zeichen) eingeben und `Passwort ändern` drücken. Danach mit Benutzer `admin` und dem neuen Passwort anmelden.
 
-Falls ein TTP223 angeschlossen ist, startet eine kurze Berührung eine sofortige Claude-Aktualisierung. Eine Berührung von mindestens fünf Sekunden löscht die gespeicherten WLAN-Zugangsdaten und startet das Gerät neu. Da danach keine WLAN-Konfiguration vorhanden ist, öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs. Claude-Konfiguration und Anzeigeeinstellungen bleiben erhalten.
+Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslassen zwischen Claude- und Wetterseite. Eine Berührung von mindestens fünf Sekunden löscht die gespeicherten WLAN-Zugangsdaten und startet das Gerät neu. Da danach keine WLAN-Konfiguration vorhanden ist, öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs. Claude-Konfiguration und Anzeigeeinstellungen bleiben erhalten.
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.3`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.4`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -241,8 +243,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.3
-git push origin v2026-10-19.3
+git tag v2026-10-19.4
+git push origin v2026-10-19.4
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

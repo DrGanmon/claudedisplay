@@ -21,6 +21,7 @@
 #include "wifi_recovery.h"
 #include "weather.h"
 #include "weather_animation.h"
+#include "touch_input.h"
 #include <memory>
 #include <time.h>
 
@@ -35,8 +36,6 @@ constexpr uint32_t SENSOR_MS = 5000;
 constexpr uint32_t DISPLAY_MS = 1000;
 constexpr uint32_t CLAUDE_MIN_MS = 60000;
 constexpr uint32_t WIFI_RETRY_MS = 15000;
-constexpr uint32_t TOUCH_DEBOUNCE_MS = 35;
-constexpr uint32_t TOUCH_RESET_MS = 5000;
 constexpr uint32_t TRUECONF_STARTUP_GRACE_MS = 60000;
 }  // namespace Timing
 
@@ -46,7 +45,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.3";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.4";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -117,12 +116,8 @@ bool weatherPage = false;
 bool forceWeatherRefresh = true;
 uint32_t lastWeatherMs = 0;
 
-bool touchRaw = false;
-bool touchStable = false;
-bool touchLongHandled = false;
-bool touchAvailable = false;
-uint32_t touchChangedMs = 0;
-uint32_t touchPressedMs = 0;
+TouchInput touchInput;
+bool touchResetRequested = false;
 
 String htmlEscape(const String &input) {
   String out;
@@ -1113,30 +1108,21 @@ void drawDisplay() {
 }
 
 void handleTouch() {
-  if (!touchAvailable) return;
-  const bool raw = digitalRead(Pins::TOUCH) == HIGH;
-  const uint32_t now = millis();
-  if (raw != touchRaw) {
-    touchRaw = raw;
-    touchChangedMs = now;
-  }
-  if (now - touchChangedMs < Timing::TOUCH_DEBOUNCE_MS || raw == touchStable) return;
-  touchStable = raw;
-  if (touchStable) {
-    touchPressedMs = now;
-    touchLongHandled = false;
-  } else if (!touchLongHandled && now - touchPressedMs < Timing::TOUCH_RESET_MS) {
+  const TouchInput::Event event = touchInput.update(digitalRead(Pins::TOUCH) == HIGH, millis());
+  if (event == TouchInput::Event::SHORT_PRESS) {
     weatherPage = !weatherPage;
     if (!weatherPage) weatherAnimation.release();
     displayNeedsFullRedraw = true;
+    Serial.println(weatherPage ? "Touch: Wetterseite" : "Touch: Claude-Seite");
     drawDisplay();
+  } else if (event == TouchInput::Event::LONG_PRESS) {
+    touchResetRequested = true;
   }
 }
 
 void handleLongTouch() {
-  if (!touchAvailable) return;
-  if (!touchStable || touchLongHandled || millis() - touchPressedMs < Timing::TOUCH_RESET_MS) return;
-  touchLongHandled = true;
+  if (!touchResetRequested) return;
+  touchResetRequested = false;
   display.fillScreen(TFT_BLACK);
   display.setTextDatum(MC_DATUM);
   display.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -1217,8 +1203,7 @@ void setup() {
   Serial.printf("Claude Display Firmware %s\n", FIRMWARE_VERSION);
   Serial.println("GC9A01: CLK=D5 MOSI=D7 DC=D4 RST=D0 CS=GND; SPI=10 MHz");
   pinMode(Pins::TOUCH, INPUT_PULLUP);
-  delay(20);
-  touchAvailable = digitalRead(Pins::TOUCH) == LOW;
+  // Sensor darf seine Einschaltkalibrierung beenden; Erkennung erfolgt im loop().
   LittleFS.begin();
   loadConfig();
 
