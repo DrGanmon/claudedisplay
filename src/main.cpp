@@ -20,6 +20,7 @@
 #include "display_layout.h"
 #include "wifi_recovery.h"
 #include "weather.h"
+#include "weather_animation.h"
 #include <memory>
 #include <time.h>
 
@@ -45,7 +46,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.1";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.2";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -80,6 +81,7 @@ LimitBucket opusLimit;
 LimitBucket sonnetLimit;
 
 TFT_eSPI display;
+WeatherAnimation weatherAnimation(display);
 ESP8266WebServer web(80);
 std::unique_ptr<WiFiManager> wifiPortal;
 WifiRecovery wifiRecovery;
@@ -1038,6 +1040,7 @@ void drawWeatherDisplay() {
   static TextDrawState title, location, temp, condition, humidity, wind, status, source;
   const bool full = displayNeedsFullRedraw;
   if (full) display.fillScreen(TFT_BLACK);
+  weatherAnimation.draw(weather.valid ? weather.code : -1, millis(), full);
   drawChangedText("Wetter", TFT_CYAN, DisplayLayout::WEATHER_TITLE, title, full);
   drawChangedText(config.weatherName, TFT_WHITE, DisplayLayout::WEATHER_LOCATION, location, full);
   drawChangedText(weather.valid ? String(weather.temperature, 1) + " C" : "--.- C",
@@ -1112,6 +1115,7 @@ void handleTouch() {
     touchLongHandled = false;
   } else if (!touchLongHandled && now - touchPressedMs < Timing::TOUCH_RESET_MS) {
     weatherPage = !weatherPage;
+    if (!weatherPage) weatherAnimation.release();
     displayNeedsFullRedraw = true;
     drawDisplay();
   }
@@ -1274,5 +1278,7 @@ void loop() {
     lastDisplayMs = millis();
     drawDisplay();
   }
+  if (weatherPage && !updateAuthenticated)
+    weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
   yield();
 }

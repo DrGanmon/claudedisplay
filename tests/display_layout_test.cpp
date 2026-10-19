@@ -14,7 +14,7 @@ int main() {
   }
   for (unsigned i = 1; i < sizeof(areas) / sizeof(areas[0]); ++i)
     assert(areas[i - 1].y + areas[i - 1].height / 2 < areas[i].y - areas[i].height / 2);
-  const TextArea weatherAreas[] = {WEATHER_TITLE, WEATHER_LOCATION, WEATHER_TEMPERATURE,
+  const TextArea weatherAreas[] = {WEATHER_TITLE, WEATHER_LOCATION, WEATHER_ICON, WEATHER_TEMPERATURE,
       WEATHER_CONDITION, WEATHER_HUMIDITY, WEATHER_WIND, WEATHER_STATUS, WEATHER_SOURCE};
   for (const TextArea &area : weatherAreas) {
     // Gesamte rechteckige Textfläche, einschliesslich Löschbereich, im Kreis.

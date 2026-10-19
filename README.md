@@ -122,7 +122,7 @@ Falls ein TTP223 angeschlossen ist, startet eine kurze Berührung eine sofortige
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.1`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.2`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -150,7 +150,7 @@ Hintergrund: [ESP8266-TLS-Puffer und MFLN](https://arduino-esp8266.readthedocs.i
 
 Unter `/settings` im Abschnitt **Wetter-Standort** Ortsname, Breitengrad und Längengrad eintragen (Dezimalpunkt, beispielsweise Berlin: `52.52`, `13.405`) und speichern. Die Koordinaten legen den tatsächlichen Abfrageort fest; der Ortsname ist die Displaybeschriftung. Der Standort bleibt nach einem Neustart erhalten. Alle drei Felder leeren deaktiviert den Abruf.
 
-Ein kurzer Touch auf den TTP223 wechselt zwischen der bisherigen Claude-Anzeige und der Wetterseite. Diese zeigt Außentemperatur, Wetterlage, relative Luftfeuchtigkeit und Windgeschwindigkeit in km/h. Die lokale Sensortemperatur bleibt auf der Claude-Seite. Fünf Sekunden Berührung lösen weiterhin den WLAN-Reset aus. Manuelle Claude-Aktualisierung bleibt über die Webseite möglich.
+Ein kurzer Touch auf den TTP223 wechselt zwischen der bisherigen Claude-Anzeige und der Wetterseite. Diese zeigt Außentemperatur, Wetterlage, relative Luftfeuchtigkeit und Windgeschwindigkeit in km/h. Sonne, Wolken, Nebel, Regen, Schnee und Gewitter werden passend zum Wettercode in einem eigenen 64×44-Pixel-Bereich animiert (Ziel: 25 Bilder/s). Das Symbol verwendet einen wiederverwendeten 8-Bit-Sprite; beim Verlassen der Wetterseite wird dessen Speicher freigegeben. Während synchroner Netzwerkabrufe pausiert die Animation kurz. Die lokale Sensortemperatur bleibt auf der Claude-Seite. Fünf Sekunden Berührung lösen weiterhin den WLAN-Reset aus. Manuelle Claude-Aktualisierung bleibt über die Webseite möglich.
 
 Die Firmware ruft die [Open-Meteo Forecast API](https://open-meteo.com/en/docs) ohne API-Schlüssel nach dem Start beziehungsweise Speichern und anschließend alle 15 Minuten ab. Bei Fehlern bleiben die letzten gültigen Werte mit Fehlerhinweis sichtbar; ohne gespeicherte Werte erscheinen Platzhalter. Ohne WLAN erscheint ein Hinweis. Wetterstatus und Werte sind zusätzlich unter `/api/status` verfügbar. Die synchronen HTTPS-Abfragen können die Bedienung kurz verzögern. Wie beim Claude-Abruf wird derzeit kein Serverzertifikat geprüft.
 
@@ -241,8 +241,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.1
-git push origin v2026-10-19.1
+git tag v2026-10-19.2
+git push origin v2026-10-19.2
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.
