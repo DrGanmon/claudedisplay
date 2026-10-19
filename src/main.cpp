@@ -21,6 +21,7 @@
 #include "active_text_cache.h"
 #include "text_strips.h"
 #include "reusable_text_buffer.h"
+#include "web_ui.h"
 #include "wifi_recovery.h"
 #include "wifi_pulse.h"
 #include "weather.h"
@@ -58,7 +59,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-20.8";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.9";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -257,35 +258,43 @@ void beginPage(const __FlashStringHelper *title) {
   web.sendHeader("Cache-Control", "no-store");
   web.setContentLength(CONTENT_LENGTH_UNKNOWN);
   web.send(200, "text/html; charset=utf-8", "");
-  web.sendContent(F("<!doctype html><html lang='de'><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                    "<style>body{font-family:system-ui;max-width:760px;margin:auto;padding:20px;background:#111827;color:#f9fafb}"
-                    "a{color:#60a5fa}nav{display:flex;gap:18px;margin-bottom:20px}.card{background:#1f2937;padding:18px;border-radius:14px;margin:12px 0}"
-                    "label{display:block;margin-top:13px;color:#d1d5db}input{box-sizing:border-box;width:100%;padding:10px;margin-top:5px;background:#111827;color:white;border:1px solid #4b5563;border-radius:7px}"
-                    "button{padding:11px 16px;margin-top:16px;background:#2563eb;color:white;border:0;border-radius:7px}.ok{color:#4ade80}.warn{color:#facc15}</style></head><body>"));
-  web.sendContent(F("<nav><a href='/'>Status</a><a href='/settings'>Einstellungen</a><a href='/update'>Firmware-Update</a></nav><h1>"));
+  web.sendContent(F("<!doctype html><html lang='de' data-theme='dark'><head><meta charset='utf-8'>"
+                    "<meta name='viewport' content='width=device-width,initial-scale=1'><meta name='theme-color' content='#171a17'><title>"));
   web.sendContent(title);
-  web.sendContent(F("</h1>"));
-  web.sendContent(F("<p>Firmware: "));
+  web.sendContent(F(" · Claude Display</title><link rel='stylesheet' href='/assets/cozy.css?v="));
   web.sendContent(FIRMWARE_VERSION);
-  web.sendContent(F("</p>"));
-  web.sendContent(F("<p>Aktuelle Uhrzeit (Europe/Berlin): <time id='deviceClock' data-unix='"));
+  web.sendContent(F("'><script defer src='/assets/cozy.js?v="));
+  web.sendContent(FIRMWARE_VERSION);
+  web.sendContent(F("'></script></head><body><a class='skip' href='#content'>Zum Inhalt</a><div class='shell'>"
+                    "<header class='topbar'><a class='brand' href='/'><span class='brand-mark' aria-hidden='true'></span>Claude Display</a>"
+                    "<nav aria-label='Hauptnavigation'><a href='/'>Übersicht</a><a href='/settings'>Einstellungen</a><a href='/update'>Firmware</a></nav>"
+                    "<button class='theme-toggle' id='themeToggle' type='button' aria-label='Zwischen hellem und dunklem Design wechseln'>Heller</button></header>"
+                    "<div class='page-heading'><div><p class='eyebrow'>Ein kleiner Moment Überblick</p><h1>"));
+  web.sendContent(title);
+  web.sendContent(F("</h1></div><div class='clock'><span class='dot' aria-hidden='true'></span><time id='deviceClock' data-unix='"));
   const time_t now = time(nullptr);
   web.sendContent(String(now >= 1577836800 ? static_cast<uint32_t>(now) : 0));
-  web.sendContent(F("'>Uhrzeit noch nicht synchronisiert</time></p>"
-                    "<script>(()=>{const el=document.getElementById('deviceClock');"
-                    "let epoch=Number(el.dataset.unix),base=performance.now();"
-                    "const fmt=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',"
-                    "day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});"
-                    "function tick(){if(!epoch){el.textContent='Uhrzeit noch nicht synchronisiert';return;}"
-                    "const d=new Date(epoch*1000+performance.now()-base);el.textContent=fmt.format(d);el.dateTime=d.toISOString();}"
-                    "async function sync(){try{const r=await fetch('/api/time',{cache:'no-store'});if(!r.ok)return;"
-                    "const t=await r.json();epoch=t.clock_synced?t.unix_time:0;base=performance.now();tick();}catch(e){}}"
-                    "tick();setInterval(tick,1000);setInterval(sync,10000);})();</script>"));
+  web.sendContent(F("'>Uhr wird synchronisiert</time><br>Europe/Berlin</div></div><main id='content'"));
+  if (web.uri() != "/") web.sendContent(F(" class='settings-layout'"));
+  web.sendContent(F("><noscript><p class='notice'>Live-Werte benötigen JavaScript. Formulare funktionieren auch ohne JavaScript.</p></noscript>"));
 }
 
 void endPage() {
-  web.sendContent(F("</body></html>"));
+  web.sendContent(F("</main><footer class='footer'><span>Ein bisschen Ruhe. Alles im Blick.</span><span>Firmware "));
+  web.sendContent(FIRMWARE_VERSION);
+  web.sendContent(F(" · <a href='/api/status'>Status-API</a></span></footer></div>"
+                    "<div id='toast' class='toast' role='status' aria-live='polite' hidden></div></body></html>"));
   web.sendContent("");
+}
+
+void sendLiveValue(const __FlashStringHelper *key, const String &value, const char *format = "raw") {
+  web.sendContent(F("<span data-live='"));
+  web.sendContent(key);
+  web.sendContent(F("' data-format='"));
+  web.sendContent(format);
+  web.sendContent(F("'>"));
+  sendHtmlEscaped(value);
+  web.sendContent(F("</span>"));
 }
 
 bool requireSettingsAuth() {
@@ -295,42 +304,65 @@ bool requireSettingsAuth() {
 }
 
 void handleStatus() {
-  beginPage(F("Claude Display"));
-  web.sendContent(F("<div class='card'><h2>Klima</h2><p>Temperatur: "));
-  web.sendContent(isnan(temperatureC) ? "--" : String(temperatureC, 1));
-  web.sendContent(F(" &deg;C<br>Luftfeuchtigkeit: "));
-  web.sendContent(isnan(humidityPct) ? "--" : String(humidityPct, 1));
-  web.sendContent(F(" %<br>Luftdruck: "));
-  web.sendContent(isnan(pressureHpa) ? "--" : String(pressureHpa, 1));
-  web.sendContent(F(" hPa</p></div><div class='card'><h2>Claude Limits</h2><p>Sitzung frei: <b>"));
-  web.sendContent(percentText(sessionLimit));
-  web.sendContent(F(" %</b><br>Woche frei: <b>"));
-  web.sendContent(percentText(weeklyLimit));
-  web.sendContent(F(" %</b>"));
-  if (sessionLimit.resetsAt.length()) {
-    web.sendContent(F("<br>Sitzungs-Reset: "));
-    sendHtmlEscaped(sessionLimit.resetsAt);
-  }
-  if (weeklyLimit.resetsAt.length()) {
-    web.sendContent(F("<br>Wochen-Reset: "));
-    sendHtmlEscaped(weeklyLimit.resetsAt);
-  }
-  web.sendContent(F("</p><p>Status: "));
+  beginPage(F("Alles im Blick."));
+  web.sendContent(F("<div id='dashboard' class='grid'><section class='card limits'><div class='card-top'>"
+                    "<h2>Platz für deine Ideen</h2><span class='tag' id='claudeBadge'>"));
   sendHtmlEscaped(claudeState);
-  web.sendContent(F("<br>Letzte Aktualisierung: "));
-  sendHtmlEscaped(lastClaudeUpdate);
-  web.sendContent(F("</p><form method='post' action='/refresh'><button>Jetzt aktualisieren</button></form></div>"));
-  web.sendContent(F("<div class='card'><h2>Gerät</h2><p>IP: "));
-  web.sendContent(WiFi.localIP().toString());
-  web.sendContent(F("<br>WLAN-Signal: "));
-  web.sendContent(String(WiFi.RSSI()));
-  web.sendContent(F(" dBm<br>Freier Heap: "));
-  web.sendContent(String(ESP.getFreeHeap()));
-  web.sendContent(F(" Bytes</p></div><div class='card'><h2>TrueConf</h2><p>Ungelesene Nachrichten: "));
-  web.sendContent(trueConfResult.valid ? String(trueConfResult.unread) : String(F("--")));
-  web.sendContent(F("<br>Status: "));
-  sendHtmlEscaped(trueConfResult.state);
-  web.sendContent(F("</p></div>"));
+  web.sendContent(F("</span></div><div class='gauges'><div class='limit'><div class='gauge' id='sessionGauge' role='img' aria-label='Sessionkontingent'>"
+                    "<div class='gauge-center'><strong>"));
+  sendLiveValue(F("five_hour.remaining"), percentText(sessionLimit), "integer");
+  web.sendContent(F("<span aria-hidden='true'>%</span></strong><small>noch frei</small></div></div><h3>Diese Session</h3><p class='reset' id='sessionReset' data-reset='"));
+  sendHtmlEscaped(sessionLimit.resetsAt);
+  web.sendContent(F("'>"));
+  sendHtmlEscaped(sessionLimit.resetsAt.length() ? sessionLimit.resetsAt : String(F("Reset noch unbekannt")));
+  web.sendContent(F("</p></div><div class='limit'><div class='gauge sage' id='weeklyGauge' role='img' aria-label='Wochenkontingent'>"
+                    "<div class='gauge-center'><strong>"));
+  sendLiveValue(F("seven_day.remaining"), percentText(weeklyLimit), "integer");
+  web.sendContent(F("<span aria-hidden='true'>%</span></strong><small>noch frei</small></div></div><h3>Diese Woche</h3><p class='reset' id='weeklyReset' data-reset='"));
+  sendHtmlEscaped(weeklyLimit.resetsAt);
+  web.sendContent(F("'>"));
+  sendHtmlEscaped(weeklyLimit.resetsAt.length() ? weeklyLimit.resetsAt : String(F("Reset noch unbekannt")));
+  web.sendContent(F("</p></div></div><div class='card-bottom'><div><p>"));
+  sendLiveValue(F("claude_state"), claudeState);
+  web.sendContent(F("</p><p class='live-note'><span class='dot' aria-hidden='true'></span><span id='liveState'>Letzter Gerätestand</span></p></div>"
+                    "<form method='post' action='/refresh'><button type='submit'>Werte auffrischen</button></form></div></section>"
+                    "<section class='card weather'><div><div class='card-top'><h2>Ein Blick nach draußen</h2><span class='weather-symbol' id='weatherSymbol' aria-hidden='true'>☁</span></div>"
+                    "<p class='big-value'>"));
+  sendLiveValue(F("weather.temperature_c"), weather.valid ? String(weather.temperature, 1) : String(F("--")), "decimal");
+  web.sendContent(F("<small> °C</small></p><p class='place'>"));
+  sendLiveValue(F("weather.location"), config.weatherName.length() ? config.weatherName : String(F("Standort noch offen")));
+  web.sendContent(F("</p><p class='caption'>"));
+  sendLiveValue(F("weather.state"), weather.state);
+  web.sendContent(F("</p></div><dl class='facts'><div><dt>Luftfeuchtigkeit</dt><dd>"));
+  sendLiveValue(F("weather.humidity_pct"), weather.valid ? String(weather.humidity, 0) : String(F("--")), "integer");
+  web.sendContent(F(" %</dd></div><div><dt>Wind</dt><dd>"));
+  sendLiveValue(F("weather.wind_kmh"), weather.valid ? String(weather.wind, 1) : String(F("--")), "decimal");
+  web.sendContent(F(" km/h</dd></div></dl><p class='caption'>Wetterdaten von <a href='https://open-meteo.com/'>Open-Meteo</a></p></section>"
+                    "<section class='card'><h2>Hier bei dir</h2><p class='big-value'>"));
+  sendLiveValue(F("temperature_c"), isnan(temperatureC) ? String(F("--")) : String(temperatureC, 1), "decimal");
+  web.sendContent(F("<small> °C</small></p><p class='caption'>Temperatur am Gerät</p><dl class='facts'><div><dt>Luftfeuchtigkeit</dt><dd>"));
+  sendLiveValue(F("humidity_pct"), isnan(humidityPct) ? String(F("--")) : String(humidityPct, 0), "integer");
+  web.sendContent(F(" %</dd></div><div><dt>Luftdruck</dt><dd>"));
+  sendLiveValue(F("pressure_hpa"), isnan(pressureHpa) ? String(F("--")) : String(pressureHpa, 1), "decimal");
+  web.sendContent(F(" hPa</dd></div></dl></section><section class='card network'><div class='card-top'><h2>Dein Display</h2><span class='tag' id='displayPage'>"));
+  web.sendContent(pages.weather() ? "Wetter" : (pages.status() ? "Status" : "Claude"));
+  web.sendContent(F("</span></div><dl class='facts'><div><dt>WLAN</dt><dd>"));
+  sendLiveValue(F("ssid"), WiFi.SSID());
+  web.sendContent(F("</dd></div><div><dt>IP-Adresse</dt><dd>"));
+  sendLiveValue(F("ip"), WiFi.localIP().toString());
+  web.sendContent(F("</dd></div><div><dt>Signalstärke</dt><dd>"));
+  sendLiveValue(F("rssi"), String(WiFi.RSSI()), "integer");
+  web.sendContent(F(" dBm</dd></div><div><dt>Freier RAM</dt><dd>"));
+  sendLiveValue(F("free_heap"), String(ESP.getFreeHeap() / 1024.0f, 1), "kib");
+  web.sendContent(F(" KiB</dd></div><div><dt>Größter freier Block</dt><dd>"));
+  sendLiveValue(F("max_free_block"), String(ESP.getMaxFreeBlockSize() / 1024.0f, 1), "kib");
+  web.sendContent(F(" KiB</dd></div><div><dt>Fragmentierung</dt><dd>"));
+  sendLiveValue(F("heap_fragmentation"), String(ESP.getHeapFragmentation()), "integer");
+  web.sendContent(F(" %</dd></div><div><dt>TrueConf · ungelesen</dt><dd>"));
+  sendLiveValue(F("trueconf.unread"), trueConfResult.valid ? String(trueConfResult.unread) : String(F("--")), "integer");
+  web.sendContent(F("</dd></div><div><dt>TrueConf</dt><dd>"));
+  sendLiveValue(F("trueconf.state"), trueConfResult.state);
+  web.sendContent(F("</dd></div></dl></section></div>"));
   endPage();
 }
 
@@ -414,7 +446,7 @@ void handleSettings() {
   web.sendContent(String(config.intervalSec));
   web.sendContent(F("'></label><button type='submit'>Claude-Einstellungen und Session-Key speichern</button></form>"
                     "<form method='post' action='/settings/test'><p>Vor dem Test einen neuen Key speichern. Getestet wird der gespeicherte Key.</p>"
-                    "<button type='submit' onclick=\"this.textContent='Teste ...';this.form.submit();this.disabled=true\">Gespeicherten Session-Key testen</button></form></div>"
+                    "<button type='submit' >Gespeicherten Session-Key testen</button></form></div>"
                     "<div class='card'><h2>Web-Passwort ändern</h2><form method='post' action='/settings/password'>"
                     "<label>Aktuelles Passwort<input type='password' name='currentPassword' autocomplete='current-password' required></label>"
                     "<label>Neues Passwort (mindestens 8 Zeichen)<input type='password' name='webPassword' autocomplete='new-password' minlength='8' required></label>"
@@ -622,10 +654,10 @@ void handleUpdatePage() {
                     "<progress id='progress' value='0' max='100' style='width:100%'></progress></div>"
                     "<script>const f=document.getElementById('updateForm'),p=document.getElementById('progress'),t=document.getElementById('progressText');"
                     "f.addEventListener('submit',e=>{e.preventDefault();if(!confirm('Firmware jetzt installieren?'))return;"
-                    "const x=new XMLHttpRequest();x.open('POST','/update');"
+                    "window.dispatchEvent(new Event('firmware-upload-start'));const x=new XMLHttpRequest();x.open('POST','/update');"
                     "x.upload.onprogress=e=>{if(e.lengthComputable){const n=Math.round(e.loaded/e.total*100);p.value=n;t.textContent='Upload: '+n+' %';}};"
                     "x.onload=()=>{document.open();document.write(x.responseText);document.close();};"
-                    "x.onerror=()=>{t.textContent='Upload fehlgeschlagen.';};x.send(new FormData(f));});</script>"));
+                    "x.onerror=()=>{t.textContent='Upload fehlgeschlagen.';window.dispatchEvent(new Event('firmware-upload-end'));};x.send(new FormData(f));});</script>"));
   endPage();
 }
 
@@ -690,6 +722,14 @@ void handleUpdateFinished() {
 void setupWebServer() {
   static bool routesRegistered = false;
   if (!routesRegistered) {
+  web.on("/assets/cozy.css", HTTP_GET, []() {
+    web.sendHeader("Cache-Control", "public, max-age=86400");
+    web.send_P(200, PSTR("text/css; charset=utf-8"), WEB_CSS);
+  });
+  web.on("/assets/cozy.js", HTTP_GET, []() {
+    web.sendHeader("Cache-Control", "public, max-age=86400");
+    web.send_P(200, PSTR("application/javascript; charset=utf-8"), WEB_JS);
+  });
   web.on("/", HTTP_GET, handleStatus);
   web.on("/settings", HTTP_GET, handleSettings);
   web.on("/settings", HTTP_POST, handleSaveSettings);
@@ -734,6 +774,9 @@ void setupWebServer() {
       doc["seven_day"]["remaining"] = 100.0f - weeklyLimit.used;
       doc["seven_day"]["resets_at"] = weeklyLimit.resetsAt;
     }
+    doc["ssid"] = WiFi.SSID();
+    doc["ip"] = WiFi.localIP().toString();
+    doc["rssi"] = WiFi.RSSI();
     doc["claude_state"] = claudeState;
     doc["clock_synced"] = time(nullptr) >= 1577836800;
     doc["trueconf"]["enabled"] = config.trueConf.enabled;
@@ -743,6 +786,7 @@ void setupWebServer() {
     doc["weather"]["state"] = weather.state;
     doc["weather"]["valid"] = weather.valid;
     if (weather.valid) {
+      doc["weather"]["code"] = weather.code;
       doc["weather"]["temperature_c"] = weather.temperature;
       doc["weather"]["humidity_pct"] = weather.humidity;
       doc["weather"]["wind_kmh"] = weather.wind;

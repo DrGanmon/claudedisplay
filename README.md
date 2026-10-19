@@ -130,9 +130,13 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.8`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.9`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
-Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
+Ab `2026-10-20.9` verwendet das Webinterface ein responsives Cozy-Design mit warmen Creme-, Honig- und Salbeitönen, abgerundeten Karten und umschaltbarem hellem/dunklem Design. Die Übersicht zeigt zwei Kontingentringe, Wetter, Raumklima sowie WLAN- und Speicherstatus. JavaScript aktualisiert die Statuswerte alle zehn Sekunden ohne Neuladen; bei ausgeblendetem Browser-Tab pausieren die Abfragen. Einstellungen bieten Abschnittssprünge, einblendbare Passwortfelder und Rückmeldungen direkt am Formular. Während einer Anfrage sind die zugehörigen Schaltflächen gesperrt. Formulare funktionieren auch ohne JavaScript; die Passwortänderung verwendet weiterhin den normalen Seitenaufruf. Der Firmwareupload behält Fortschrittsanzeige und Bestätigung und pausiert die Live-Abfragen.
+
+CSS und JavaScript liegen im Programm-Flash und werden vom Gerät als versionierte, im Browser zwischengespeicherte Dateien ausgeliefert. Externe Bibliotheken, Schriften oder CDNs werden nicht benötigt. Lediglich die Designauswahl wird im Browser gespeichert; Zugangsdaten werden nicht im Local Storage abgelegt.
+
+Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich etwa jede Minute mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhr wird synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
 Version `2026-10-17.11` behebt vorzeitig abgeschnittene Einstellungsseiten bei leeren Konfigurationswerten. Leere Servernamen, Organisations-IDs oder andere optionale Textfelder dürfen keinen leeren HTTP-Chunk auslösen, da dieser die Antwort beendet. Der TrueConf-Abschnitt zeigt deshalb auch vor der ersten Konfiguration alle Felder und beide Buttons vollständig an.
 
