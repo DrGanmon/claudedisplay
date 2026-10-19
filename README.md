@@ -130,7 +130,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.7`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.8`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -172,13 +172,17 @@ Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3
 
 ### Speicher beim Seitenwechsel
 
+Ab `2026-10-20.8` wird ein gemeinsamer 210×4-Pixel-Textsprite in 16-Bit-Farbe zwischen Zeichenaufrufen wiederverwendet, statt pro Textzeile neu angelegt und gelöscht zu werden. Sein Pixelpuffer benötigt rund 1.680 Bytes plus kleinen Bibliotheks-Overhead. Der Zuschnitt auf schmalere Textzeilen und den letzten Teilstreifen bleibt erhalten. Vor Claude-, TrueConf- und Wetter-TLS-Abfragen werden Textsprite und Formatier-Arbeitsstring freigegeben; beim nächsten nötigen Zeichnen werden sie erneut angelegt. Damit bleibt während der Anzeige etwas mehr Heap reserviert, es gibt aber erheblich weniger kurzlebige Allokationen. Eine niedrigere Fragmentierungsquote ist erst durch Laufzeitmessung am Gerät nachweisbar.
+
+Temperatur-, Luftfeuchtigkeits-, Wind-, Prozent-, Countdown-, IP- und Gerätestatuszeilen werden in begrenzten Zeichenpuffern auf dem Stack formatiert. Unveränderte C-Zeichenketten werden direkt mit dem Textcache verglichen, ohne zunächst einen temporären Arduino-String anzulegen. Ein gemeinsam genutzter Arbeitsstring reserviert 64 Bytes für die Schriftanpassung; längere Cachezeilen reservieren 40 Bytes Kapazität und behalten diese bis zum Seitenwechsel. Weitere feste Meldungen, Formatvorlagen und Wetter-URL-Bausteine liegen im Flash. Cookie und Wetter-URL reservieren ihre berechnete Endlänge vor dem Anhängen. Während der WLAN-Pulsanimation wird die SSID nur noch einmal pro Sekunde beziehungsweise beim kompletten Seitenaufbau abgefragt, statt bei jedem Animationsbild. 16-Bit-Farben und der vollständige TLS-Empfangspuffer bleiben erhalten.
+
 Ab `2026-10-20.4` werden Texte in wiederverwendeten, nur vier Pixel hohen 16-Bit-Streifen gezeichnet. Der größte angeforderte Textbildpuffer sinkt damit von 196×28×2 = 10.976 Bytes auf höchstens 210×4×2 = 1.680 Bytes (jeweils ohne kleinen Bibliotheks-/Allokator-Overhead). Schrift, Zentrierung und Farben bleiben gleich. Der letzte Teilstreifen wird auf die tatsächliche Resthöhe beschnitten; Die Zeichenstreifen werden weiterhin auf den gültigen Displaybereich beschnitten. Ohne verfügbaren Sprite-Speicher bleibt der bisherige direkte Zeichenpfad erhalten.
 
 Claude filtert und speichert nur noch die tatsächlich genutzten `five_hour`- und `seven_day`-Limits. Die ungenutzten Opus-/Sonnet-Limitobjekte und ihre Resetstrings entfallen; auch der temporäre JSON-Baum wird dadurch kleiner. Der volle TLS-Empfangspuffer bleibt unverändert.
 
 Ab `2026-10-20.2` teilen sich Claude-, Wetter-, Status- und WLAN-Verbindungsanzeige einen Textcache mit zehn Zeilenplätzen. Er speichert nur die zuletzt gezeichneten Texte und Farben der aktuell dargestellten Anzeige. Beim Wechsel wird jeder alte Zeilenzustand zerstört und neu angelegt, sodass auch reservierter Stringspeicher freigegeben wird. Der neue Bildschirm wird vollständig gezeichnet; unveränderte Zeilen derselben Anzeige behalten weiterhin ihren Cache. Auch der automatische Übergang zwischen WLAN-Animation und normaler Anzeige wechselt den Cache.
 
-Die letzten Mess- und API-Werte, Einstellungen sowie kleine Navigations- und Ringanimationszustände bleiben erhalten. Sie ermöglichen die Rückkehr ohne erneuten Abruf. Es gibt keinen vollständigen Bildschirmpuffer. Textzeilen-Sprites werden nach dem Zeichnen gelöscht; der Wetteranimationspuffer wird beim Verlassen der Wetterseite freigegeben. Der Programmcode liegt weiterhin im Flash beziehungsweise im zeitkritischen IRAM und wird nicht seitenweise geladen.
+Die letzten Mess- und API-Werte, Einstellungen sowie kleine Navigations- und Ringanimationszustände bleiben erhalten. Sie ermöglichen die Rückkehr ohne erneuten Abruf. Es gibt keinen vollständigen Bildschirmpuffer. Der gemeinsame Textsprite wird vor TLS-Abfragen freigegeben; der Wetteranimationspuffer wird beim Verlassen der Wetterseite freigegeben. Der Programmcode liegt weiterhin im Flash beziehungsweise im zeitkritischen IRAM und wird nicht seitenweise geladen.
 
 ### Gemütliche Claude-Anzeige
 
@@ -301,8 +305,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-20.7
-git push origin v2026-10-20.7
+git tag v2026-10-20.8
+git push origin v2026-10-20.8
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

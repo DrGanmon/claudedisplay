@@ -6,7 +6,7 @@ WeatherResult fetchWeather(const String &latitude, const String &longitude) {
   WeatherResult result;
   if (!validWeatherCoordinate(latitude.c_str(), 90) ||
       !validWeatherCoordinate(longitude.c_str(), 180)) {
-    result.state = "Standort ungueltig";
+    result.state = F("Standort ungueltig");
     return result;
   }
   BearSSL::WiFiClientSecure client;
@@ -16,17 +16,24 @@ WeatherResult fetchWeather(const String &latitude, const String &longitude) {
   HTTPClient http;
   http.setTimeout(5000);
   http.useHTTP10(true);
-  const String url = "https://api.open-meteo.com/v1/forecast?latitude=" + latitude +
-      "&longitude=" + longitude +
-      "&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&forecast_days=1";
+  String url;
+  url.reserve(latitude.length() + longitude.length() +
+      sizeof("https://api.open-meteo.com/v1/forecast?latitude=") + sizeof("&longitude=") +
+      sizeof("&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&forecast_days=1") - 3);
+  url = F("https://api.open-meteo.com/v1/forecast?latitude=");
+  url += latitude;
+  url += F("&longitude=");
+  url += longitude;
+  url += F("&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&forecast_days=1");
   if (!http.begin(client, url)) {
-    result.state = "Wetter-Verbindungsfehler";
+    result.state = F("Wetter-Verbindungsfehler");
     return result;
   }
   http.addHeader("Accept-Encoding", "identity");
   const int status = http.GET();
   if (status != HTTP_CODE_OK) {
-    result.state = "Wetter HTTP " + String(status);
+    result.state = F("Wetter HTTP ");
+    result.state += status;
     http.end();
     return result;
   }
@@ -35,7 +42,7 @@ WeatherResult fetchWeather(const String &latitude, const String &longitude) {
   const DeserializationError error = deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
   http.end();
   if (error || !validWeatherCurrent(doc["current"])) {
-    result.state = "Wetterdaten ungueltig";
+    result.state = F("Wetterdaten ungueltig");
     return result;
   }
   result.temperature = doc["current"]["temperature_2m"];
@@ -43,6 +50,6 @@ WeatherResult fetchWeather(const String &latitude, const String &longitude) {
   result.wind = doc["current"]["wind_speed_10m"];
   result.code = doc["current"]["weather_code"];
   result.valid = true;
-  result.state = "Aktuell";
+  result.state = F("Aktuell");
   return result;
 }

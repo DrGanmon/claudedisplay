@@ -38,6 +38,7 @@ struct Sprite {
 int main() {
   // Compare strip output pixel-for-pixel with a complete centered row,
   // including partial strips, empty text clearing and an iris-like viewport.
+  for (int bufferWidth : {20, 210})
   for (int height : {8, 10, 16, 18, 28})
     for (bool visible : {false, true})
       for (bool clipped : {false, true}) {
@@ -46,7 +47,7 @@ int main() {
           expected.left = actual.left = 13; expected.right = actual.right = 22;
           expected.top = actual.top = 10; expected.bottom = actual.bottom = 19;
         }
-        Sprite full(expected, 20, height), strip(actual, 20, TextStrips::HEIGHT);
+        Sprite full(expected, 20, height), strip(actual, bufferWidth, TextStrips::HEIGHT);
         full.fillSprite(0);
         full.drawString(visible, 10, height / 2);
         full.pushSprite(8, 4, 0, 0, 20, height);

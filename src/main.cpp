@@ -20,6 +20,7 @@
 #include "display_layout.h"
 #include "active_text_cache.h"
 #include "text_strips.h"
+#include "reusable_text_buffer.h"
 #include "wifi_recovery.h"
 #include "wifi_pulse.h"
 #include "weather.h"
@@ -57,7 +58,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-20.7";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.8";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -90,6 +91,15 @@ LimitBucket sessionLimit;
 LimitBucket weeklyLimit;
 
 TFT_eSPI display;
+TFT_eSprite textSprite(&display);
+ReusableTextBuffer<TFT_eSprite> textBuffer(textSprite);
+String fittedText;
+
+void releaseDisplayScratch() {
+  textBuffer.release();
+  fittedText = String();
+}
+
 WeatherAnimation weatherAnimation(display);
 ESP8266WebServer web(80);
 std::unique_ptr<WiFiManager> wifiPortal;
@@ -519,6 +529,7 @@ void handleSaveTrueConf() {
 
 void refreshTrueConf() {
   if (pages.requestsPaused()) { forceTrueConfRefresh = true; return; }
+  releaseDisplayScratch();
   trueConfResult = fetchTrueConfUnread(config.trueConf);
   lastTrueConfMs = millis();
   forceTrueConfRefresh = false;
@@ -623,10 +634,10 @@ void handleUpdateUpload() {
   if (upload.status == UPLOAD_FILE_START) {
     updateAuthenticated = web.authenticate("admin", config.webPassword.c_str());
     updateSuccessful = false;
-    updateError = "";
+    updateError = F("");
     if (!updateAuthenticated) return;
     if (!upload.filename.endsWith(".bin")) {
-      updateError = "Nur eine firmware.bin ist erlaubt.";
+      updateError = F("Nur eine firmware.bin ist erlaubt.");
       return;
     }
     const uint32_t freeSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
@@ -650,7 +661,7 @@ void handleUpdateUpload() {
     else updateError = "Abschlussfehler " + String(Update.getError()) + ".";
   } else if (updateAuthenticated && upload.status == UPLOAD_FILE_ABORTED) {
     Update.end();
-    updateError = "Upload wurde abgebrochen.";
+    updateError = F("Upload wurde abgebrochen.");
   }
   yield();
 }
@@ -758,7 +769,10 @@ void setupWebServer() {
 }
 
 String cookieHeader() {
-  String cookie = "sessionKey=" + config.sessionKey;
+  String cookie;
+  cookie.reserve(11 + config.sessionKey.length() + (config.extraCookies.length() ? 2 + config.extraCookies.length() : 0));
+  cookie = F("sessionKey=");
+  cookie += config.sessionKey;
   if (config.extraCookies.length()) {
     cookie += "; ";
     cookie += config.extraCookies;
@@ -823,6 +837,7 @@ bool claudeResponseEncodingSupported(HTTPClient &http) {
 }
 
 bool prepareClaudeTlsRequest() {
+  releaseDisplayScratch();
   weatherAnimation.release();
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t largestBlock = ESP.getMaxFreeBlockSize();
@@ -1068,38 +1083,49 @@ struct TextDrawState {
 using DisplayTextCache = ActiveTextCache<TextDrawState, 10>;
 DisplayTextCache activeTextCache;
 
-void drawChangedText(const String &text, uint16_t color, const DisplayLayout::TextArea &area,
+void drawChangedText(const char *text, uint16_t color, const DisplayLayout::TextArea &area,
                      TextDrawState &previous, bool fullRedraw) {
-  if (!fullRedraw && text == previous.text && color == previous.color) return;
+  if (!fullRedraw && previous.text == text && color == previous.color) return;
   const int y = area.y, width = area.width, height = area.height;
   if (!display.checkViewport(120 - width / 2, y - height / 2, width, height)) return;
   const uint8_t font = area.font;
   // Vier Pixel hoher 16-Bit-Streifen statt kompletter Textzeile.
-  TFT_eSprite row(&display);
-  row.setColorDepth(16);
-  if (row.createSprite(width, TextStrips::HEIGHT)) {
+  fittedText.reserve(64);
+  fittedText = text;
+  TFT_eSprite &row = textSprite;
+  if (textBuffer.ensure()) {
     row.setTextDatum(MC_DATUM);
     row.setTextColor(color, TFT_BLACK);
     row.setTextFont(font);
     if (row.textWidth(text) > width) row.setTextFont(1);
-    String fitted = text;
-    while (row.textWidth(fitted) > width && fitted.length()) fitted.remove(fitted.length() - 1);
-    TextStrips::draw(row, display, fitted, 120 - width / 2, y - height / 2, width, height);
-    row.deleteSprite();
+    while (row.textWidth(fittedText) > width && fittedText.length()) fittedText.remove(fittedText.length() - 1);
+    TextStrips::draw(row, display, fittedText, 120 - width / 2, y - height / 2, width, height);
   } else {
     // Bei knappem Heap weiterhin eine lesbare Anzeige ohne Vollbildlöschen.
     display.setTextDatum(MC_DATUM);
     display.setTextColor(color, TFT_BLACK);
     display.setTextFont(font);
     if (display.textWidth(text) > width) display.setTextFont(1);
-    String fitted = text;
-    while (display.textWidth(fitted) > width && fitted.length()) fitted.remove(fitted.length() - 1);
+    while (display.textWidth(fittedText) > width && fittedText.length()) fittedText.remove(fittedText.length() - 1);
     display.setTextPadding(width);
-    display.drawString(fitted, 120, y);
+    display.drawString(fittedText, 120, y);
     display.setTextPadding(0);
   }
+  if (strlen(text) > 11) previous.text.reserve(40);
   previous.text = text;
   previous.color = color;
+}
+
+void drawChangedText(const String &text, uint16_t color, const DisplayLayout::TextArea &area,
+                     TextDrawState &previous, bool fullRedraw) {
+  drawChangedText(text.c_str(), color, area, previous, fullRedraw);
+}
+
+void drawChangedText(const __FlashStringHelper *text, uint16_t color, const DisplayLayout::TextArea &area,
+                     TextDrawState &previous, bool fullRedraw) {
+  if (!fullRedraw && previous.text == text && previous.color == color) return;
+  const String value(text);
+  drawChangedText(value.c_str(), color, area, previous, fullRedraw);
 }
 
 void drawWeatherDisplay() {
@@ -1126,20 +1152,25 @@ void drawWeatherDisplay() {
   }
   if (display.checkViewport(88, 58, 64, 44))
     weatherAnimation.draw(weather.valid ? weather.code : -1, millis(), full);
-  drawChangedText("Draussen", WeatherTheme::HONEY, DisplayLayout::WEATHER_TITLE, title, full);
+  drawChangedText(F("Draussen"), WeatherTheme::HONEY, DisplayLayout::WEATHER_TITLE, title, full);
   drawChangedText(config.weatherName, WeatherTheme::CREAM, DisplayLayout::WEATHER_LOCATION, location, full);
-  drawChangedText(weather.valid ? String(weather.temperature, 1) + " C" : "--.- C",
-                  WeatherTheme::CREAM, DisplayLayout::WEATHER_TEMPERATURE, temp, full);
-  drawChangedText(weather.valid ? weatherDescription(weather.code) : "Keine Wetterdaten",
-                  WeatherTheme::MUTED, DisplayLayout::WEATHER_CONDITION, condition, full);
-  drawChangedText(weather.valid ? "Feuchte " + String(weather.humidity, 0) + " %" : "",
-                  WeatherTheme::SKY, DisplayLayout::WEATHER_HUMIDITY, humidity, full);
-  drawChangedText(weather.valid ? "Wind " + String(weather.wind, 0) + " km/h" : "",
-                  WeatherTheme::SAGE, DisplayLayout::WEATHER_WIND, wind, full);
-  const String state = !config.weatherName.length() ? "Standort in Einstellungen" :
-      (WiFi.status() != WL_CONNECTED ? "WLAN getrennt" : weather.state);
-  drawChangedText(state, WeatherTheme::MUTED, DisplayLayout::WEATHER_STATUS, status, full);
-  drawChangedText("Open-Meteo", WeatherTheme::MUTED, DisplayLayout::WEATHER_SOURCE, source, full);
+  char line[64];
+  if (weather.valid) snprintf_P(line, sizeof(line), PSTR("%.1f C"), static_cast<double>(weather.temperature));
+  else snprintf_P(line, sizeof(line), PSTR("--.- C"));
+  drawChangedText(line, WeatherTheme::CREAM, DisplayLayout::WEATHER_TEMPERATURE, temp, full);
+  if (weather.valid) drawChangedText(weatherDescription(weather.code), WeatherTheme::MUTED,
+                                    DisplayLayout::WEATHER_CONDITION, condition, full);
+  else drawChangedText(F("Keine Wetterdaten"), WeatherTheme::MUTED, DisplayLayout::WEATHER_CONDITION, condition, full);
+  if (weather.valid) snprintf_P(line, sizeof(line), PSTR("Feuchte %.0f %%"), static_cast<double>(weather.humidity));
+  else line[0] = '\0';
+  drawChangedText(line, WeatherTheme::SKY, DisplayLayout::WEATHER_HUMIDITY, humidity, full);
+  if (weather.valid) snprintf_P(line, sizeof(line), PSTR("Wind %.0f km/h"), static_cast<double>(weather.wind));
+  else line[0] = '\0';
+  drawChangedText(line, WeatherTheme::SAGE, DisplayLayout::WEATHER_WIND, wind, full);
+  if (!config.weatherName.length())
+    drawChangedText(F("Standort in Einstellungen"), WeatherTheme::MUTED, DisplayLayout::WEATHER_STATUS, status, full);
+  else drawChangedText(weather.state, WeatherTheme::MUTED, DisplayLayout::WEATHER_STATUS, status, full);
+  drawChangedText(F("Open-Meteo"), WeatherTheme::MUTED, DisplayLayout::WEATHER_SOURCE, source, full);
   displayNeedsFullRedraw = false;
   displayDirty = false;
 }
@@ -1168,31 +1199,41 @@ void drawStatusDisplay() {
   const String ssidText = wifiPortal ? String(SETUP_AP) : WiFi.SSID();
   drawChangedText(ssidText.length() ? ssidText : String(F("Kein WLAN gespeichert")), WeatherTheme::CREAM,
                   DisplayLayout::STATUS_SSID, ssid, full);
+  char line[80];
   const int rssi = connected ? WiFi.RSSI() : -100;
-  const String signalText = connected
-      ? String(F("Signal ")) + String(rssi) + F(" dBm / ") + String(constrain(2 * (rssi + 100), 0, 100)) + F(" %")
-      : String(F("Signal --"));
-  drawChangedText(signalText, WeatherTheme::SAGE, DisplayLayout::STATUS_SIGNAL, signal, full);
-  const String ipText = connected ? WiFi.localIP().toString() : (wifiPortal ? WiFi.softAPIP().toString() : String(F("--")));
-  drawChangedText(String(F("IP ")) + ipText, WeatherTheme::CREAM, DisplayLayout::STATUS_IP, ip, full);
-  drawChangedText(String(F("Kanal ")) + (connected ? String(WiFi.channel()) : String(F("--"))) +
-                  (time(nullptr) >= 1577836800 ? F("  |  Uhr synchron") : F("  |  Uhr wartet")),
-                  WeatherTheme::MUTED, DisplayLayout::STATUS_CHANNEL, channel, full);
-  drawChangedText(String(F("RAM ")) + String(ESP.getFreeHeap() / 1024) + F("K  |  Block ") +
-                  String(ESP.getMaxFreeBlockSize() / 1024) + F("K"),
-                  WeatherTheme::SKY, DisplayLayout::STATUS_HEAP, heap, full);
+  if (connected) snprintf_P(line, sizeof(line), PSTR("Signal %d dBm / %d %%"), rssi, constrain(2 * (rssi + 100), 0, 100));
+  else snprintf_P(line, sizeof(line), PSTR("Signal --"));
+  drawChangedText(line, WeatherTheme::SAGE, DisplayLayout::STATUS_SIGNAL, signal, full);
+  if (connected || wifiPortal) {
+    const IPAddress address = connected ? WiFi.localIP() : WiFi.softAPIP();
+    snprintf_P(line, sizeof(line), PSTR("IP %u.%u.%u.%u"),
+        static_cast<unsigned>(address[0]), static_cast<unsigned>(address[1]),
+        static_cast<unsigned>(address[2]), static_cast<unsigned>(address[3]));
+  } else snprintf_P(line, sizeof(line), PSTR("IP --"));
+  drawChangedText(line, WeatherTheme::CREAM, DisplayLayout::STATUS_IP, ip, full);
+  char channelText[8];
+  if (connected) snprintf(channelText, sizeof(channelText), "%d", WiFi.channel());
+  else snprintf_P(channelText, sizeof(channelText), PSTR("--"));
+  snprintf_P(line, sizeof(line), PSTR("Kanal %s  |  Uhr %s"), channelText,
+      time(nullptr) >= 1577836800 ? "synchron" : "wartet");
+  drawChangedText(line, WeatherTheme::MUTED, DisplayLayout::STATUS_CHANNEL, channel, full);
+  snprintf_P(line, sizeof(line), PSTR("RAM %luK  |  Block %luK"),
+      static_cast<unsigned long>(ESP.getFreeHeap() / 1024), static_cast<unsigned long>(ESP.getMaxFreeBlockSize() / 1024));
+  drawChangedText(line, WeatherTheme::SKY, DisplayLayout::STATUS_HEAP, heap, full);
   const uint32_t minutes = millis() / 60000UL;
-  drawChangedText(String(F("Laufzeit ")) + String(minutes / 1440) + F("T ") +
-                  String((minutes / 60) % 24) + F("h ") + String(minutes % 60) + F("min"),
-                  WeatherTheme::MUTED, DisplayLayout::STATUS_UPTIME, uptime, full);
-  drawChangedText(String(F("FW ")) + FIRMWARE_VERSION, WeatherTheme::MUTED, DisplayLayout::STATUS_VERSION, version, full);
+  snprintf_P(line, sizeof(line), PSTR("Laufzeit %luT %luh %lumin"),
+      static_cast<unsigned long>(minutes / 1440), static_cast<unsigned long>((minutes / 60) % 24),
+      static_cast<unsigned long>(minutes % 60));
+  drawChangedText(line, WeatherTheme::MUTED, DisplayLayout::STATUS_UPTIME, uptime, full);
+  snprintf_P(line, sizeof(line), PSTR("FW %s"), FIRMWARE_VERSION);
+  drawChangedText(line, WeatherTheme::MUTED, DisplayLayout::STATUS_VERSION, version, full);
   drawChangedText(F("Tap zum Zurueck"), WeatherTheme::HONEY, DisplayLayout::STATUS_HINT, hint, full);
   displayNeedsFullRedraw = false;
   displayDirty = false;
 }
 
 void drawWifiConnecting(bool force = false) {
-  static uint32_t lastFrame = 0;
+  static uint32_t lastFrame = 0, lastSsidCheck = 0;
   const uint32_t now = millis();
   const bool full = activeTextCache.select(DisplayTextCache::Screen::WIFI) || force || displayNeedsFullRedraw;
   TextDrawState &name = activeTextCache[0];
@@ -1213,11 +1254,14 @@ void drawWifiConnecting(bool force = false) {
   drawChangedText(F("WLAN"), WeatherTheme::CREAM, DisplayLayout::WIFI_TITLE, title, full);
   drawChangedText(portal ? F("In Ruhe einrichten") : F("Verbinde ..."), WeatherTheme::HONEY,
                   DisplayLayout::WIFI_STATE, state, full);
-  drawChangedText(portal ? String(SETUP_AP) : WiFi.SSID(), WeatherTheme::CREAM,
-                  DisplayLayout::WIFI_SSID, ssid, full);
+  if (full || now - lastSsidCheck >= 1000) {
+    lastSsidCheck = now;
+    drawChangedText(portal ? String(SETUP_AP) : WiFi.SSID(), WeatherTheme::CREAM,
+                    DisplayLayout::WIFI_SSID, ssid, full);
+  }
   drawChangedText(portal ? F("Setup-WLAN ist bereit") : F("Einen Moment ..."), WeatherTheme::MUTED,
                   DisplayLayout::WIFI_HINT, hint, full);
-  drawChangedText(portal ? String(F("AP 192.168.4.1")) : String(), WeatherTheme::SAGE,
+  drawChangedText(portal ? F("AP 192.168.4.1") : F(""), WeatherTheme::SAGE,
                   DisplayLayout::WIFI_IP, ip, full);
   displayNeedsFullRedraw = false;
   displayDirty = false;
@@ -1241,8 +1285,10 @@ void drawDisplay() {
 
   drawClaudeRings(fullRedraw);
   drawChangedText(config.displayName, WeatherTheme::CREAM, DisplayLayout::NAME, name, fullRedraw);
-  const String temperatureText = isnan(temperatureC) ? "--.- C" : String(temperatureC, 1) + " C";
-  drawChangedText(temperatureText, WeatherTheme::MUTED, DisplayLayout::TEMPERATURE, temperature, fullRedraw);
+  char line[64];
+  if (isnan(temperatureC)) snprintf_P(line, sizeof(line), PSTR("--.- C"));
+  else snprintf_P(line, sizeof(line), PSTR("%.1f C"), static_cast<double>(temperatureC));
+  drawChangedText(line, WeatherTheme::MUTED, DisplayLayout::TEMPERATURE, temperature, fullRedraw);
   char sessionReset[24], weeklyReset[24];
   const int64_t now = static_cast<int64_t>(time(nullptr));
   char clockText[6] = "--:--";
@@ -1254,27 +1300,33 @@ void drawDisplay() {
   drawChangedText(clockText, WeatherTheme::CREAM, DisplayLayout::CLOCK, clock, fullRedraw);
   formatCozyResetRemaining(sessionLimit.valid ? sessionLimit.resetEpoch : -1, now, sessionReset, sizeof(sessionReset));
   formatCozyResetRemaining(weeklyLimit.valid ? weeklyLimit.resetEpoch : -1, now, weeklyReset, sizeof(weeklyReset));
-  drawChangedText(String(F("Session ")) + percentText(sessionLimit) + F(" %"),
-                  cozyLimitColor(sessionLimit.used, WeatherTheme::HONEY),
-                  DisplayLayout::SESSION, session, fullRedraw);
-  drawChangedText(String(F("Reset in ")) + sessionReset, WeatherTheme::MUTED,
-                  DisplayLayout::SESSION_RESET, sessionCountdown, fullRedraw);
-  drawChangedText(String(F("Woche ")) + percentText(weeklyLimit) + F(" %"),
-                  cozyLimitColor(weeklyLimit.used, WeatherTheme::SAGE),
-                  DisplayLayout::WEEKLY, weekly, fullRedraw);
-  drawChangedText(String(F("Reset in ")) + weeklyReset, WeatherTheme::MUTED,
-                  DisplayLayout::WEEKLY_RESET, weeklyCountdown, fullRedraw);
+  if (sessionLimit.valid) snprintf_P(line, sizeof(line), PSTR("Session %.0f %%"),
+      static_cast<double>(constrain(100.0f - sessionLimit.used, 0.0f, 100.0f)));
+  else snprintf_P(line, sizeof(line), PSTR("Session -- %%"));
+  drawChangedText(line, cozyLimitColor(sessionLimit.used, WeatherTheme::HONEY), DisplayLayout::SESSION, session, fullRedraw);
+  snprintf_P(line, sizeof(line), PSTR("Reset in %s"), sessionReset);
+  drawChangedText(line, WeatherTheme::MUTED, DisplayLayout::SESSION_RESET, sessionCountdown, fullRedraw);
+  if (weeklyLimit.valid) snprintf_P(line, sizeof(line), PSTR("Woche %.0f %%"),
+      static_cast<double>(constrain(100.0f - weeklyLimit.used, 0.0f, 100.0f)));
+  else snprintf_P(line, sizeof(line), PSTR("Woche -- %%"));
+  drawChangedText(line, cozyLimitColor(weeklyLimit.used, WeatherTheme::SAGE), DisplayLayout::WEEKLY, weekly, fullRedraw);
+  snprintf_P(line, sizeof(line), PSTR("Reset in %s"), weeklyReset);
+  drawChangedText(line, WeatherTheme::MUTED, DisplayLayout::WEEKLY_RESET, weeklyCountdown, fullRedraw);
   const bool connected = claudeState == F("Verbunden");
-  const String statusText = config.trueConf.enabled
-      ? String(F("TC ")) + (trueConfResult.valid ? String(trueConfResult.unread) : String(F("--")))
-      : (connected ? String(F("Verbunden")) : String(F("Claude pruefen")));
-  drawChangedText(statusText, connected ? WeatherTheme::SAGE : WeatherTheme::MUTED,
-                  DisplayLayout::TRUECONF, trueConf, fullRedraw);
-  // Without prefix the complete IPv4 address fits the narrow circular footer.
-  const String networkText = WiFi.status() == WL_CONNECTED
-      ? (config.showIp ? WiFi.localIP().toString() : String())
-      : (wifiPortal ? String(F("AP 192.168.4.1")) : String(F("WLAN getrennt")));
-  drawChangedText(networkText, WeatherTheme::MUTED, DisplayLayout::NETWORK, network, fullRedraw);
+  if (config.trueConf.enabled) {
+    if (trueConfResult.valid) snprintf_P(line, sizeof(line), PSTR("TC %lu"), static_cast<unsigned long>(trueConfResult.unread));
+    else snprintf_P(line, sizeof(line), PSTR("TC --"));
+  } else if (connected) snprintf_P(line, sizeof(line), PSTR("Verbunden"));
+  else snprintf_P(line, sizeof(line), PSTR("Claude pruefen"));
+  drawChangedText(line, connected ? WeatherTheme::SAGE : WeatherTheme::MUTED, DisplayLayout::TRUECONF, trueConf, fullRedraw);
+  line[0] = '\0';
+  if (config.showIp) {
+    const IPAddress address = WiFi.localIP();
+    snprintf_P(line, sizeof(line), PSTR("%u.%u.%u.%u"),
+        static_cast<unsigned>(address[0]), static_cast<unsigned>(address[1]),
+        static_cast<unsigned>(address[2]), static_cast<unsigned>(address[3]));
+  }
+  drawChangedText(line, WeatherTheme::MUTED, DisplayLayout::NETWORK, network, fullRedraw);
   displayNeedsFullRedraw = false;
   displayDirty = false;
 }
@@ -1422,7 +1474,7 @@ void setup() {
   handleWifiRecovery();
   forceClaudeRefresh = true;
   forceTrueConfRefresh = false;
-  if (config.trueConf.enabled) trueConfResult.state = "Erster Abruf 60 Sekunden nach Webserver-Start";
+  if (config.trueConf.enabled) trueConfResult.state = F("Erster Abruf 60 Sekunden nach Webserver-Start");
   drawDisplay();
 }
 
@@ -1460,6 +1512,7 @@ void loop() {
       (forceWeatherRefresh || millis() - lastWeatherMs >= 900000UL)) {
     forceWeatherRefresh = false;
     lastWeatherMs = millis();
+    releaseDisplayScratch();
     WeatherResult next = fetchWeather(config.weatherLatitude, config.weatherLongitude);
     if (next.valid) weather = next;
     else weather.state = weather.valid ? "Alte Daten / Abruffehler" : next.state;
