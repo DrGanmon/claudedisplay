@@ -20,7 +20,7 @@ class RingStartup {
     return static_cast<int>(target * eased + 0.5f);
   }
  private:
-  static constexpr uint32_t DURATION = 15000;
+  static constexpr uint32_t DURATION = 5000;
   uint32_t elapsed = 0, last = 0;
   bool ticking = false, complete = false;
 };
