@@ -19,6 +19,7 @@
 #include "trueconf.h"
 #include "display_layout.h"
 #include "wifi_recovery.h"
+#include "weather.h"
 #include <memory>
 #include <time.h>
 
@@ -44,7 +45,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-17.17";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.1";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -59,6 +60,9 @@ struct Config {
   String webPassword = DEFAULT_WEB_PASSWORD;
   uint32_t intervalSec = 180;
   TrueConfConfig trueConf;
+  String weatherName;
+  String weatherLatitude;
+  String weatherLongitude;
   String ntpServer = "pool.ntp.org";
 };
 
@@ -105,6 +109,11 @@ TrueConfResult trueConfResult;
 uint32_t lastTrueConfMs = 0;
 bool forceTrueConfRefresh = false;
 uint32_t webServerReadyMs = 0;
+
+WeatherResult weather;
+bool weatherPage = false;
+bool forceWeatherRefresh = true;
+uint32_t lastWeatherMs = 0;
 
 bool touchRaw = false;
 bool touchStable = false;
@@ -190,12 +199,18 @@ bool loadConfig() {
   config.trueConf.fingerprint = doc["trueConf"]["fingerprint"] | "";
   config.trueConf.insecure = doc["trueConf"]["insecure"] | false;
   config.trueConf.intervalSec = constrain(static_cast<uint32_t>(doc["trueConf"]["intervalSec"] | 60), 30UL, 3600UL);
+  config.weatherName = doc["weather"]["name"] | "";
+  config.weatherLatitude = doc["weather"]["latitude"] | "";
+  config.weatherLongitude = doc["weather"]["longitude"] | "";
   normalizeClaudeConfig();
   return true;
 }
 
 bool saveConfig() {
   JsonDocument doc;
+  doc["weather"]["name"] = config.weatherName;
+  doc["weather"]["latitude"] = config.weatherLatitude;
+  doc["weather"]["longitude"] = config.weatherLongitude;
   doc["displayName"] = config.displayName;
   doc["showIp"] = config.showIp;
   doc["sessionKey"] = config.sessionKey;
@@ -338,6 +353,21 @@ void sendTrueConfSettings() {
   web.sendContent(F("</p></div>"));
 }
 
+void sendWeatherSettings() {
+  web.sendContent(F("<div class='card'><h2>Wetter-Standort</h2><form method='post' action='/settings/weather'>"
+                    "<p>Standort über Koordinaten festlegen. Kurzer Touch wechselt die Displayseite. Alle Felder leeren deaktiviert den Wetterabruf.</p>"
+                    "<label>Ortsname<input name='weatherName' maxlength='40' value='"));
+  sendHtmlEscaped(config.weatherName);
+  web.sendContent(F("'></label><label>Breitengrad (-90 bis 90)<input name='latitude' type='number' step='any' min='-90' max='90' value='"));
+  sendHtmlEscaped(config.weatherLatitude);
+  web.sendContent(F("'></label><label>Längengrad (-180 bis 180)<input name='longitude' type='number' step='any' min='-180' max='180' value='"));
+  sendHtmlEscaped(config.weatherLongitude);
+  web.sendContent(F("'></label><button type='submit'>Wetter-Standort speichern</button></form>"
+                    "<p>Daten: <a href='https://open-meteo.com/'>Open-Meteo</a> (CC BY 4.0), Aktualisierung alle 15 Minuten.</p><p>Status: "));
+  sendHtmlEscaped(weather.state);
+  web.sendContent(F("</p></div>"));
+}
+
 void handleSettings() {
   if (!requireSettingsAuth()) return;
   beginPage(F("Einstellungen"));
@@ -380,6 +410,7 @@ void handleSettings() {
                     "<button type='submit'>Passwort ändern</button></form></div>"
                     "<div class='card'><p>Benutzername der Einstellungsseite: <b>admin</b></p>"
                     "<p>Falls ein TTP223 angeschlossen ist: mindestens 5 Sekunden berühren, um WLAN neu einzurichten.</p></div>"));
+  sendWeatherSettings();
   sendTrueConfSettings();
   endPage();
 }
@@ -390,6 +421,27 @@ void settingsResult(const String &message) {
   sendHtmlEscaped(message);
   web.sendContent(F("</p><a href='/settings'>Zurück zu den Einstellungen</a></div>"));
   endPage();
+}
+
+void handleSaveWeather() {
+  if (!requireSettingsAuth()) return;
+  String name = web.arg("weatherName"), lat = web.arg("latitude"), lon = web.arg("longitude");
+  name.trim(); lat.trim(); lon.trim();
+  const bool disabled = !name.length() && !lat.length() && !lon.length();
+  if (!disabled && (!name.length() || name.length() > 40 ||
+      !validWeatherCoordinate(lat.c_str(), 90) || !validWeatherCoordinate(lon.c_str(), 180))) {
+    settingsResult("Bitte Ortsname und gültige Koordinaten mit Dezimalpunkt eingeben."); return;
+  }
+  const Config previous = config;
+  config.weatherName = name; config.weatherLatitude = lat; config.weatherLongitude = lon;
+  if (!saveConfig()) {
+    config = previous;
+    settingsResult("Wetter-Standort konnte nicht gespeichert werden."); return;
+  }
+  weather = WeatherResult();
+  forceWeatherRefresh = true;
+  displayNeedsFullRedraw = true;
+  settingsResult("Wetter-Standort gespeichert.");
 }
 
 void handleSaveDisplayName() {
@@ -621,6 +673,7 @@ void setupWebServer() {
   web.on("/", HTTP_GET, handleStatus);
   web.on("/settings", HTTP_GET, handleSettings);
   web.on("/settings", HTTP_POST, handleSaveSettings);
+  web.on("/settings/weather", HTTP_POST, handleSaveWeather);
   web.on("/settings/name", HTTP_POST, handleSaveDisplayName);
   web.on("/settings/trueconf", HTTP_POST, handleSaveTrueConf);
   web.on("/settings/trueconf/test", HTTP_POST, handleTestTrueConf);
@@ -666,6 +719,14 @@ void setupWebServer() {
     doc["trueconf"]["enabled"] = config.trueConf.enabled;
     doc["trueconf"]["state"] = trueConfResult.state;
     if (trueConfResult.valid) doc["trueconf"]["unread"] = trueConfResult.unread;
+    doc["weather"]["location"] = config.weatherName;
+    doc["weather"]["state"] = weather.state;
+    doc["weather"]["valid"] = weather.valid;
+    if (weather.valid) {
+      doc["weather"]["temperature_c"] = weather.temperature;
+      doc["weather"]["humidity_pct"] = weather.humidity;
+      doc["weather"]["wind_kmh"] = weather.wind;
+    }
     doc["free_heap"] = ESP.getFreeHeap();
     String body;
     serializeJson(doc, body);
@@ -973,7 +1034,30 @@ void drawChangedText(const String &text, uint16_t color, const DisplayLayout::Te
   previous.color = color;
 }
 
+void drawWeatherDisplay() {
+  static TextDrawState title, location, temp, condition, humidity, wind, status, source;
+  const bool full = displayNeedsFullRedraw;
+  if (full) display.fillScreen(TFT_BLACK);
+  drawChangedText("Wetter", TFT_CYAN, {27, 120, 20, 2}, title, full);
+  drawChangedText(config.weatherName, TFT_WHITE, {52, 180, 20, 2}, location, full);
+  drawChangedText(weather.valid ? String(weather.temperature, 1) + " C" : "--.- C",
+                  TFT_WHITE, {84, 200, 30, 4}, temp, full);
+  drawChangedText(weather.valid ? weatherDescription(weather.code) : "Keine Wetterdaten",
+                  TFT_WHITE, {115, 210, 20, 2}, condition, full);
+  drawChangedText(weather.valid ? "Feuchte " + String(weather.humidity, 0) + " %" : "",
+                  TFT_WHITE, {141, 200, 20, 2}, humidity, full);
+  drawChangedText(weather.valid ? "Wind " + String(weather.wind, 0) + " km/h" : "",
+                  TFT_WHITE, {165, 180, 20, 2}, wind, full);
+  const String state = !config.weatherName.length() ? "Standort in Einstellungen" :
+      (WiFi.status() != WL_CONNECTED ? "WLAN getrennt" : weather.state);
+  drawChangedText(state, TFT_WHITE, {188, 158, 14, 1}, status, full);
+  drawChangedText("Open-Meteo", TFT_DARKGREY, {207, 108, 12, 1}, source, full);
+  displayNeedsFullRedraw = false;
+  displayDirty = false;
+}
+
 void drawDisplay() {
+  if (weatherPage) { drawWeatherDisplay(); return; }
   static RingDrawState sessionRing, weeklyRing;
   static TextDrawState name, temperature, clock, session, weekly, network, trueConf;
   const bool fullRedraw = displayNeedsFullRedraw;
@@ -1026,8 +1110,10 @@ void handleTouch() {
   if (touchStable) {
     touchPressedMs = now;
     touchLongHandled = false;
-  } else if (!touchLongHandled) {
-    forceClaudeRefresh = true;
+  } else if (!touchLongHandled && now - touchPressedMs < Timing::TOUCH_RESET_MS) {
+    weatherPage = !weatherPage;
+    displayNeedsFullRedraw = true;
+    drawDisplay();
   }
 }
 
@@ -1173,6 +1259,15 @@ void loop() {
   if (config.trueConf.enabled && (forceTrueConfRefresh ||
       (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
        millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
+
+  if (WiFi.status() == WL_CONNECTED && config.weatherName.length() &&
+      (forceWeatherRefresh || millis() - lastWeatherMs >= 900000UL)) {
+    forceWeatherRefresh = false;
+    lastWeatherMs = millis();
+    WeatherResult next = fetchWeather(config.weatherLatitude, config.weatherLongitude);
+    if (next.valid) weather = next;
+    else weather.state = weather.valid ? "Alte Daten / Abruffehler" : next.state;
+  }
 
   // Auch Countdown und Netzstatus prüfen; unveränderte Textzeilen erzeugen keine SPI-Ausgabe.
   if (millis() - lastDisplayMs >= Timing::DISPLAY_MS) {

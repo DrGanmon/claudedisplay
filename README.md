@@ -6,7 +6,7 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 
 - Wemos D1 Mini mit ESP8266
 - rundes GC9A01A-SPI-Display mit 240 × 240 Pixeln
-- optional: TTP223-Touchsensor für manuelle Aktualisierung und WLAN-Reset
+- optional: TTP223-Touchsensor für Seitenwechsel und WLAN-Reset
 - optional: BME280 für Temperatur, Luftdruck und Luftfeuchtigkeit oder
 - optional: BMP280 für Temperatur und Luftdruck ohne Luftfeuchtigkeit
 - geeignetes USB-Netzteil
@@ -49,7 +49,7 @@ Eigenständige Firmware für einen ESP8266/Wemos D1 Mini. Das Gerät zeigt Raumk
 
 ### Bedienung des optionalen TTP223
 
-- falls angeschlossen, kurz berühren: Claude-Limits sofort aktualisieren
+- falls angeschlossen, kurz berühren: zwischen Claude-Anzeige und Wetterseite wechseln
 - falls angeschlossen, mindestens fünf Sekunden berühren: WLAN-Zugangsdaten löschen und ESP8266 neu starten
 - nach dem Neustart öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs
 - Claude-Zugang und übrige Gerätekonfiguration bleiben dabei erhalten
@@ -122,7 +122,7 @@ Falls ein TTP223 angeschlossen ist, startet eine kurze Berührung eine sofortige
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-17.17`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.1`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -145,6 +145,16 @@ Seit Version `2026-10-17.6` extrahiert die Firmware wie das PS1-Skript die erste
 Negative Fehlernummern stammen vom ESP8266-HTTPClient, nicht von Claude. `-4` bedeutet in der verwendeten Bibliothek „not connected“, bevor die HTTP-Antwort gelesen werden konnte. Seit Version `2026-10-17.4` verwenden Organisationssuche und Limit-Abruf einen TLS-Empfangspuffer von 16 KiB statt unbestätigt verkleinerter Puffer. HTTP/1.0 und `Accept-Encoding: identity` vermeiden Chunk-Framing beziehungsweise Kompression beim direkten JSON-Lesen aus dem Stream. Fehler zeigen den betroffenen Abruf, den HTTPClient-Fehlertext und bei Transportfehlern zusätzlich verfügbare TLS-Details und freien Heap. Erkannte Cloudflare-Challenges werden gesondert gemeldet.
 
 Hintergrund: [ESP8266-TLS-Puffer und MFLN](https://arduino-esp8266.readthedocs.io/en/latest/esp8266wifi/bearssl-client-secure-class.html#mfln-or-maximum-fragment-length-negotiation-saving-ram), [ArduinoJson mit HTTPClient](https://arduinojson.org/v7/how-to/use-arduinojson-with-httpclient/).
+
+### Wetterseite einrichten
+
+Unter `/settings` im Abschnitt **Wetter-Standort** Ortsname, Breitengrad und Längengrad eintragen (Dezimalpunkt, beispielsweise Berlin: `52.52`, `13.405`) und speichern. Die Koordinaten legen den tatsächlichen Abfrageort fest; der Ortsname ist die Displaybeschriftung. Der Standort bleibt nach einem Neustart erhalten. Alle drei Felder leeren deaktiviert den Abruf.
+
+Ein kurzer Touch auf den TTP223 wechselt zwischen der bisherigen Claude-Anzeige und der Wetterseite. Diese zeigt Außentemperatur, Wetterlage, relative Luftfeuchtigkeit und Windgeschwindigkeit in km/h. Die lokale Sensortemperatur bleibt auf der Claude-Seite. Fünf Sekunden Berührung lösen weiterhin den WLAN-Reset aus. Manuelle Claude-Aktualisierung bleibt über die Webseite möglich.
+
+Die Firmware ruft die [Open-Meteo Forecast API](https://open-meteo.com/en/docs) ohne API-Schlüssel nach dem Start beziehungsweise Speichern und anschließend alle 15 Minuten ab. Bei Fehlern bleiben die letzten gültigen Werte mit Fehlerhinweis sichtbar; ohne gespeicherte Werte erscheinen Platzhalter. Ohne WLAN erscheint ein Hinweis. Wetterstatus und Werte sind zusätzlich unter `/api/status` verfügbar. Die synchronen HTTPS-Abfragen können die Bedienung kurz verzögern. Wie beim Claude-Abruf wird derzeit kein Serverzertifikat geprüft.
+
+Wetterdaten: [Open-Meteo](https://open-meteo.com/), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Die kostenlose API ist für nichtkommerzielle Nutzung vorgesehen.
 
 ### TrueConf-Nachrichtenzähler einrichten
 
@@ -231,8 +241,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-17.17
-git push origin v2026-10-17.17
+git tag v2026-10-19.1
+git push origin v2026-10-19.1
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.
