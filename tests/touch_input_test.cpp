@@ -3,19 +3,23 @@
 int main() {
   using E = TouchInput::Event;
   TouchInput touch;
+  assert(!touch.isArmed() && !touch.isPressed());
   // HIGH at power-on or absent module must never trigger a reset.
   assert(touch.update(true, 0) == E::NONE);
   assert(touch.update(true, 6000) == E::NONE);
   assert(touch.update(false, 6010) == E::NONE);
   assert(touch.update(false, 6045) == E::NONE);
+  assert(touch.isArmed() && !touch.isPressed());
   // Bounce is ignored; a short press triggers once on release.
   assert(touch.update(true, 6100) == E::NONE);
   assert(touch.update(false, 6110) == E::NONE);
   assert(touch.update(false, 6150) == E::NONE);
   assert(touch.update(true, 6200) == E::NONE);
   assert(touch.update(true, 6235) == E::NONE);
+  assert(touch.isPressed());
   assert(touch.update(false, 6400) == E::NONE);
   assert(touch.update(false, 6435) == E::SHORT_PRESS);
+  assert(!touch.isPressed());
   assert(touch.update(false, 6500) == E::NONE);
   // Long press fires once and does not switch pages on release.
   touch.update(true, 7000);

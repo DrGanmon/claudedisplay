@@ -4,6 +4,8 @@
 class TouchInput {
  public:
   enum class Event { NONE, SHORT_PRESS, LONG_PRESS };
+  bool isArmed() const { return armed; }
+  bool isPressed() const { return armed && stable; }
   Event update(bool pressed, uint32_t now) {
     if (!initialized || pressed != raw) {
       initialized = true;

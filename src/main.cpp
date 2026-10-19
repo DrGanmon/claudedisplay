@@ -46,7 +46,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.5";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.6";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -732,6 +732,10 @@ void setupWebServer() {
       doc["weather"]["humidity_pct"] = weather.humidity;
       doc["weather"]["wind_kmh"] = weather.wind;
     }
+    doc["touch"]["raw_high"] = digitalRead(Pins::TOUCH) == HIGH;
+    doc["touch"]["ready"] = touchInput.isArmed();
+    doc["touch"]["pressed"] = touchInput.isPressed();
+    doc["display_page"] = weatherPage ? "weather" : "claude";
     doc["free_heap"] = ESP.getFreeHeap();
     doc["max_free_block"] = ESP.getMaxFreeBlockSize();
     doc["heap_fragmentation"] = ESP.getHeapFragmentation();
@@ -1121,7 +1125,13 @@ void drawDisplay() {
 }
 
 void handleTouch() {
+  static bool wasArmed = false, wasPressed = false;
   const TouchInput::Event event = touchInput.update(digitalRead(Pins::TOUCH) == HIGH, millis());
+  if (touchInput.isArmed() && !wasArmed) Serial.println(F("Touch: LOW erkannt, Sensor bereit"));
+  if (touchInput.isPressed() != wasPressed)
+    Serial.println(touchInput.isPressed() ? F("Touch: gedrueckt (HIGH)") : F("Touch: losgelassen (LOW)"));
+  wasArmed = touchInput.isArmed();
+  wasPressed = touchInput.isPressed();
   if (event == TouchInput::Event::SHORT_PRESS) {
     weatherPage = !weatherPage;
     if (!weatherPage) weatherAnimation.release();
@@ -1215,13 +1225,16 @@ void setup() {
   Serial.println();
   Serial.printf("Claude Display Firmware %s\n", FIRMWARE_VERSION);
   Serial.println(F("GC9A01: CLK=D5 MOSI=D7 DC=D4 RST=D0 CS=GND; SPI=10 MHz"));
-  pinMode(Pins::TOUCH, INPUT_PULLUP);
-  // Sensor darf seine Einschaltkalibrierung beenden; Erkennung erfolgt im loop().
   LittleFS.begin();
   loadConfig();
 
   display.init();
   display.setRotation(0);
+  // ESP8266 SPI.begin() beansprucht auch ohne Display-MISO GPIO12/D6.
+  // Erst NACH display.init() den Pinmux wieder als Touch-GPIO konfigurieren.
+  // GC9A01 ist hier nur schreibend angeschlossen (kein MISO).
+  pinMode(Pins::TOUCH, INPUT_PULLUP);
+  Serial.println(F("Touch: D6/GPIO12 nach Displaystart als Eingang eingerichtet"));
   // Sichtbarer Selbsttest vor WLAN und Claude: benötigt keine Netzwerkverbindung.
   Serial.println(F("Display-Selbsttest: Rot, Gruen, Blau, Weiss"));
   for (uint16_t color : {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE}) {
