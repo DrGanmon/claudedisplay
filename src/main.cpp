@@ -23,8 +23,13 @@
 #include "weather_animation.h"
 #include "touch_input.h"
 #include "tls_memory.h"
+#include <umm_malloc/umm_heap_select.h>
 #include <memory>
 #include <time.h>
+
+#ifndef MMU_IRAM_HEAP
+#error "Claude TLS requires the shared IRAM heap configured in platformio.ini"
+#endif
 
 namespace Pins {
 constexpr uint8_t I2C_SDA = D2;
@@ -46,7 +51,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.6";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.7";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -822,11 +827,19 @@ bool prepareClaudeTlsRequest() {
   weatherAnimation.release();
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t largestBlock = ESP.getMaxFreeBlockSize();
-  Serial.printf("Claude TLS: Heap=%lu, groesster Block=%lu\n",
-                static_cast<unsigned long>(freeHeap), static_cast<unsigned long>(largestBlock));
-  if (hasClaudeTlsMemory(freeHeap, largestBlock)) return true;
+  uint32_t iramFree = 0, iramLargest = 0;
+  {
+    HeapSelectIram selectIram;
+    iramFree = ESP.getFreeHeap();
+    iramLargest = ESP.getMaxFreeBlockSize();
+  }
+  Serial.printf("Claude TLS: DRAM=%lu, Block=%lu; IRAM=%lu, Block=%lu\n",
+                static_cast<unsigned long>(freeHeap), static_cast<unsigned long>(largestBlock),
+                static_cast<unsigned long>(iramFree), static_cast<unsigned long>(iramLargest));
+  if (hasClaudeTlsMemory(freeHeap, largestBlock, iramFree, iramLargest)) return true;
   claudeState = F("Claude-Abruf ausgesetzt: zu wenig TLS-Speicher. Heap ");
-  claudeState += String(freeHeap) + F(" Bytes, groesster Block ") + String(largestBlock) + F(" Bytes");
+  claudeState += String(freeHeap) + F(" Bytes, groesster Block ") + String(largestBlock) +
+      F(" Bytes; IRAM ") + String(iramFree) + F(" Bytes, Block ") + String(iramLargest);
   return false;
 }
 

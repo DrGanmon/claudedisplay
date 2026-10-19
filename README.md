@@ -128,7 +128,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.6`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.7`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -158,11 +158,15 @@ Version `2026-10-19.5` entschärft einen beobachteten Absturz beim Claude-Verbin
 
 Der Button für den gespeicherten Session-Key merkt den Abruf jetzt vor und beendet zuerst die Webantwort und deren Clientverbindung. Der eigentliche Test läuft anschließend in der Hauptschleife. Ergebnis und Fehlerdetails stehen auf der Statusseite `/`. Auf der Wetterseite bleibt er bis zum Zurückwechseln vorgemerkt.
 
-Feste Meldungstexte liegen verstärkt im Flash. Vor beiden Claude-HTTPS-Abrufen (Organisationssuche und Limits) wird nach Anlage des Clients und der Header geprüft, ob mindestens 28.000 Bytes Heap und ein zusammenhängender Block von 18.000 Bytes verfügbar sind. Diese konservativen Grenzen lassen neben dem vollständigen 16-KiB-TLS-Empfangspuffer Platz für weitere TLS- und WLAN-Allokationen. Bei zu wenig Speicher erscheint ein Fehlerstatus statt eines gestarteten Handshakes. Das ist eine Schutzmaßnahme, keine Garantie gegen sämtliche SDK-Abstürze. Der Empfangspuffer wird nicht ohne MFLN verkleinert.
+Feste Meldungstexte liegen verstärkt im Flash. Seit `2026-10-19.7` verwendet die Firmware die vom ESP8266-Core unterstützte Aufteilung **16 KiB Flash-Cache + 48 KiB IRAM mit gemeinsam genutztem zweitem Heap** (`PIO_FRAMEWORK_ARDUINO_MMU_CACHE16_IRAM48_SECHEAP_SHARED`). Die installierte BearSSL-Implementierung legt ihre I/O-Puffer bevorzugt in diesem zweiten Heap ab. Damit bleibt der volle 16-KiB-TLS-Empfangspuffer erhalten, während der normale DRAM-Heap für WLAN und andere Daten entlastet wird. Der kleinere Flash-Cache und nicht ausgerichtete IRAM-Zugriffe können die Ausführung verlangsamen; Darstellung und Verbindungen müssen am Gerät nachgeprüft werden.
 
-Der serielle Monitor protokolliert `Claude TLS: Heap=..., groesster Block=...` ohne Zugangsdaten. `/api/status` liefert zusätzlich `max_free_block` und `heap_fragmentation`. Für die Nachprüfung neue Firmware installieren, Claude-Seite öffnen, den Test vormerken und danach Statusseite und seriellen Monitor prüfen. Ein Flash-Erase ist nicht erforderlich.
+Vor beiden Claude-Abrufen werden die Heaps getrennt geprüft. Der bisherige DRAM-Pfad erfordert weiterhin mindestens 28.000 Bytes frei und einen zusammenhängenden Block von 18.000 Bytes. Für den IRAM-Pfad sind mindestens 18.000 Bytes IRAM frei mit einem Block von 17.000 Bytes sowie mindestens 18.000 Bytes DRAM frei mit einem Block von 6.000 Bytes erforderlich. Diese konservativen Reserven berücksichtigen den Empfangspuffer einschließlich Protokoll- und Allokator-Overhead sowie weitere TLS-/WLAN-Daten. Bei zu wenig Speicher erscheint ein Fehlerstatus statt eines gestarteten Handshakes. Die zweite Heapgröße hängt auch vom Platzbedarf des Programmcodes ab; die Schutzprüfung verwendet deshalb Laufzeitwerte.
 
-Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3.0.0/esp8266wifi/bearssl-client-secure-class.html), [vergleichbarer SDK-Absturz in der Ratentabelle](https://github.com/espressif/ESP8266_NONOS_SDK/issues/320).
+Die gemeldeten Werte `Heap 24264 Bytes, groesster Block 23016 Bytes` scheitern am bisherigen DRAM-Gesamtminimum, nicht an Fragmentierung. Mit ausreichend großem zweitem Heap dürfen dieselben DRAM-Werte nun einen Abruf starten. Die Schutzgrenze wird nicht pauschal abgesenkt.
+
+Der serielle Monitor protokolliert jetzt `Claude TLS: DRAM=..., Block=...; IRAM=..., Block=...` ohne Zugangsdaten. `/api/status` liefert außerdem `max_free_block` und `heap_fragmentation` für den DRAM-Heap. Für die Nachprüfung neue Firmware installieren, Claude-Seite öffnen, den Test vormerken und danach Statusseite und seriellen Monitor prüfen. Ein Flash-Erase ist nicht erforderlich.
+
+Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3.0.0/esp8266wifi/bearssl-client-secure-class.html), [IRAM und zweiter Heap](https://arduino-esp8266.readthedocs.io/en/latest/mmu.html), [vergleichbarer SDK-Absturz in der Ratentabelle](https://github.com/espressif/ESP8266_NONOS_SDK/issues/320).
 
 ### Wetterseite einrichten
 
@@ -259,8 +263,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.6
-git push origin v2026-10-19.6
+git tag v2026-10-19.7
+git push origin v2026-10-19.7
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.
