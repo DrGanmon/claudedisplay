@@ -58,7 +58,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-20.4";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.5";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -127,6 +127,7 @@ WeatherResult weather;
 DisplayPages pages;
 PageTransition pageTransition;
 bool transitionRendering = false;
+struct { int x = 0, y = 0, width = 240, height = 240; } transitionClip;
 bool forceWeatherRefresh = true;
 uint32_t lastWeatherMs = 0;
 
@@ -1011,6 +1012,8 @@ uint16_t cozyLimitColor(float used, uint16_t base) {
 void drawLimitRing(int radius, int thickness, const LimitBucket &bucket,
                    RingDrawState &previous, bool fullRedraw, uint16_t baseColor) {
   const int inner = radius - thickness;
+  if (transitionRendering && !PageTransition::intersectsRing(radius, inner,
+      transitionClip.x, transitionClip.y, transitionClip.width, transitionClip.height)) return;
   const int target = bucket.valid
       ? static_cast<int>(360.0f * constrain(100.0f - bucket.used, 0.0f, 100.0f) / 100.0f) : 0;
   const bool reset = fullRedraw || bucket.valid != previous.valid;
@@ -1309,6 +1312,8 @@ void drawPageTransition() {
       const int newHalf = PageTransition::halfWidth(frame.radius, y);
       if (newHalf <= oldHalf) continue;
       const auto reveal = [&](int x, int width) {
+        transitionClip.x = x; transitionClip.y = y;
+        transitionClip.width = width; transitionClip.height = 4;
         display.setViewport(x, y, width, 4, false);
         displayNeedsFullRedraw = true;
         drawDisplay();

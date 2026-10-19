@@ -130,7 +130,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.4`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.5`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -188,7 +188,7 @@ Neue Limitwerte bewegen die Ringe schrittweise zum Ziel (höchstens 25 Aktualisi
 
 ### Sanfter Seitenwechsel
 
-Ab `2026-10-20.3` schließt sich beim Wechsel per Tap oder Doppeltap eine kreisförmige schwarze Blende zur Mitte. Anschließend öffnet sie sich wieder auf der neuen Seite. Das gilt auch für die Rückkehr von der Statusseite. Die Sollzeit beträgt rund 560 ms; die tatsächliche Dauer hängt von der Zeichenzeit am Gerät ab.
+Ab `2026-10-20.3` schließt sich beim Wechsel per Tap oder Doppeltap eine kreisförmige schwarze Blende zur Mitte. Anschließend öffnet sie sich wieder auf der neuen Seite. Das gilt auch für die Rückkehr von der Statusseite. Die Mindestdauer beträgt rund 560 ms; die tatsächliche Dauer hängt von der Zeichenzeit am Gerät ab. Ab `2026-10-20.5` wird die Animation pro tatsächlich gezeichnetem Schritt weitergeschaltet, damit langsames Zeichnen keine Öffnungsschritte mehr überspringt. Text und Ringe werden in den bereits offenen Kreisstreifen unmittelbar sichtbar. Ringberechnungen werden für Ausschnitte übersprungen, die den jeweiligen Ring einschließlich Kantenglättung nicht berühren.
 
 Die Blende nutzt keinen zweiten Bildschirmpuffer und liest keine Pixel vom Display zurück. Beim Schließen werden nur neu verdeckte Bereiche gelöscht. Beim Öffnen werden die neu sichtbaren Kreisstreifen mit Viewport-Clipping nachgezeichnet; Textflächen außerhalb des Ausschnitts werden übersprungen. Der gemeinsame Textcache bleibt erhalten. Automatische API-Abfragen warten bis zum Ende des Übergangs; manuelle Claude-/TrueConf-Anforderungen werden vorgemerkt. Weitere kurze Taps während der Blende werden ignoriert, der lange WLAN-Reset bleibt verfügbar. Die normale Wetter-, Ring- oder WLAN-Animation läuft nach der Blende weiter. Verhalten und Flüssigkeit müssen zusätzlich am Gerät geprüft werden.
 
@@ -303,8 +303,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-20.4
-git push origin v2026-10-20.4
+git tag v2026-10-20.5
+git push origin v2026-10-20.5
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.
