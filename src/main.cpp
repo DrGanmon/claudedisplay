@@ -19,6 +19,7 @@
 #include "trueconf.h"
 #include "display_layout.h"
 #include "active_text_cache.h"
+#include "text_strips.h"
 #include "wifi_recovery.h"
 #include "wifi_pulse.h"
 #include "weather.h"
@@ -57,7 +58,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-20.3";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.4";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -88,8 +89,6 @@ struct LimitBucket {
 Config config;
 LimitBucket sessionLimit;
 LimitBucket weeklyLimit;
-LimitBucket opusLimit;
-LimitBucket sonnetLimit;
 
 TFT_eSPI display;
 WeatherAnimation weatherAnimation(display);
@@ -937,7 +936,7 @@ void fetchClaudeUsage() {
   }
 
   JsonDocument filter;
-  for (const char *key : {"five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"}) {
+  for (const char *key : {"five_hour", "seven_day"}) {
     filter[key]["utilization"] = true;
     filter[key]["resets_at"] = true;
   }
@@ -951,8 +950,6 @@ void fetchClaudeUsage() {
   const JsonObjectConst root = doc.as<JsonObjectConst>();
   readBucket(root, "five_hour", sessionLimit);
   readBucket(root, "seven_day", weeklyLimit);
-  readBucket(root, "seven_day_opus", opusLimit);
-  readBucket(root, "seven_day_sonnet", sonnetLimit);
   if (!sessionLimit.valid && !weeklyLimit.valid) {
     claudeState = F("Antwort ohne bekannte Limits");
     return;
@@ -1080,19 +1077,17 @@ void drawChangedText(const String &text, uint16_t color, const DisplayLayout::Te
   const int y = area.y, width = area.width, height = area.height;
   if (!display.checkViewport(120 - width / 2, y - height / 2, width, height)) return;
   const uint8_t font = area.font;
-  // Nur eine kleine Textzeile puffern; kein 240x240-Vollbild im ESP8266-RAM.
+  // Vier Pixel hoher 16-Bit-Streifen statt kompletter Textzeile.
   TFT_eSprite row(&display);
   row.setColorDepth(16);
-  if (row.createSprite(width, height)) {
-    row.fillSprite(TFT_BLACK);
+  if (row.createSprite(width, TextStrips::HEIGHT)) {
     row.setTextDatum(MC_DATUM);
     row.setTextColor(color, TFT_BLACK);
     row.setTextFont(font);
     if (row.textWidth(text) > width) row.setTextFont(1);
     String fitted = text;
     while (row.textWidth(fitted) > width && fitted.length()) fitted.remove(fitted.length() - 1);
-    row.drawString(fitted, width / 2, height / 2);
-    row.pushSprite(120 - width / 2, y - height / 2);
+    TextStrips::draw(row, display, fitted, 120 - width / 2, y - height / 2, width, height);
     row.deleteSprite();
   } else {
     // Bei knappem Heap weiterhin eine lesbare Anzeige ohne Vollbildlöschen.
