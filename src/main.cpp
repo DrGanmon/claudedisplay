@@ -46,7 +46,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.2";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.3";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -518,6 +518,7 @@ void handleSaveTrueConf() {
 }
 
 void refreshTrueConf() {
+  if (weatherPage) { forceTrueConfRefresh = true; return; }
   trueConfResult = fetchTrueConfUnread(config.trueConf);
   lastTrueConfMs = millis();
   forceTrueConfRefresh = false;
@@ -526,6 +527,11 @@ void refreshTrueConf() {
 
 void handleTestTrueConf() {
   if (!requireSettingsAuth()) return;
+  if (weatherPage) {
+    forceTrueConfRefresh = true;
+    settingsResult("TrueConf-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel.");
+    return;
+  }
   refreshTrueConf();
   settingsResult(trueConfResult.valid ? "TrueConf verbunden. Ungelesene Nachrichten: " + String(trueConfResult.unread)
                                      : "TrueConf-Test: " + trueConfResult.state);
@@ -556,6 +562,11 @@ void fetchClaudeUsage();
 
 void handleTestSessionKey() {
   if (!requireSettingsAuth()) return;
+  if (weatherPage) {
+    forceClaudeRefresh = true;
+    settingsResult("Claude-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel.");
+    return;
+  }
   forceClaudeRefresh = false;
   fetchClaudeUsage();
   lastClaudeMs = millis();
@@ -858,6 +869,7 @@ void readBucket(JsonObjectConst root, const char *key, LimitBucket &bucket) {
 }
 
 void fetchClaudeUsage() {
+  if (weatherPage) { forceClaudeRefresh = true; return; }
   normalizeClaudeConfig();
   if (WiFi.status() != WL_CONNECTED || !config.sessionKey.length()) {
     claudeState = config.sessionKey.length() ? "WLAN getrennt" : "sessionKey fehlt";
@@ -1254,13 +1266,15 @@ void loop() {
 
   const uint32_t configuredIntervalMs = config.intervalSec * static_cast<uint32_t>(1000);
   const uint32_t intervalMs = max(Timing::CLAUDE_MIN_MS, configuredIntervalMs);
-  if (forceClaudeRefresh || now - lastClaudeMs >= intervalMs) {
+  // Fällige Abrufe und manuelle Anforderungen während der Wetterseite behalten.
+  // Beim Zurückwechseln greifen die bisherigen Intervalle automatisch wieder.
+  if (!weatherPage && (forceClaudeRefresh || now - lastClaudeMs >= intervalMs)) {
     forceClaudeRefresh = false;
     lastClaudeMs = now;
     fetchClaudeUsage();
   }
 
-  if (config.trueConf.enabled && (forceTrueConfRefresh ||
+  if (!weatherPage && config.trueConf.enabled && (forceTrueConfRefresh ||
       (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
        millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
 
