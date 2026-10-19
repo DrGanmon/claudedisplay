@@ -10,7 +10,7 @@ class WeatherAnimation {
  public:
   explicit WeatherAnimation(TFT_eSPI &screen) : sprite(&screen) {}
   void release() { sprite.deleteSprite(); ready = false; }
-  void draw(int code, uint32_t now, bool force = false) {
+  void draw(int code, uint32_t now, bool force = false, bool publish = true) {
     if (!force && ready && now - lastFrame < 40) return;
     if (!ready) {
       sprite.setColorDepth(8);
@@ -66,6 +66,10 @@ class WeatherAnimation {
       for (int i = 0; i < 3; ++i)
         sprite.fillCircle(22 + i * 10, 22, 2, (phase / 8 == i) ? WeatherTheme::HONEY : WeatherTheme::FRAME);
     }
+    if (publish) pushFrozen();
+  }
+  void pushFrozen() {
+    if (!ready) return;
     sprite.pushSprite(120 - DisplayLayout::WEATHER_ICON.width / 2,
                       DisplayLayout::WEATHER_ICON.y - DisplayLayout::WEATHER_ICON.height / 2);
   }

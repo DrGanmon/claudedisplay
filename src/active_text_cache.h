@@ -18,6 +18,7 @@ class ActiveTextCache {
     current = screen;
     return true;
   }
+  Screen screen() const { return current; }
   State &operator[](size_t index) { return slots[index]; }
  private:
   Screen current = Screen::NONE;

@@ -16,7 +16,6 @@ void yield() {}
 constexpr int TFT_BLACK = 0;
 PageTransition pageTransition;
 bool transitionRendering = false, displayNeedsFullRedraw = false;
-struct { int x, y, width, height; } transitionClip;
 struct {
   std::vector<int> pixels = std::vector<int>(240 * 240, 7);
   int left = 0, top = 0, right = 240, bottom = 240;
@@ -33,8 +32,14 @@ struct {
   }
 } display;
 int target(int x, int y) { return 1000 + y * 240 + x; }
-void drawDisplay() {
-  assert(transitionRendering && displayNeedsFullRedraw);
+int preparations = 0;
+void prepareTransitionPage() { ++preparations; }
+struct DisplayTextCache { enum class Screen { CLAUDE, WEATHER }; };
+struct { DisplayTextCache::Screen screen() { return DisplayTextCache::Screen::WEATHER; } } activeTextCache;
+void drawClaudeRings(bool) {}
+void renderTransitionSlice(int x, int y, int width, int height) {
+  assert(transitionRendering);
+  display.setViewport(x, y, width, height, false);
   for (int y = display.top; y < display.bottom; ++y)
     for (int x = display.left; x < display.right; ++x)
       display.pixels[y * 240 + x] = target(x, y);
@@ -48,6 +53,7 @@ int main() {
   for (int frameTime : {40, 1000}) {
     display.pixels.assign(240 * 240, 7);
     clockMs = 0;
+    preparations = 0;
     pageTransition.start(clockMs);
     for (int i = 0; i <= 14; ++i) {
       clockMs = i * frameTime;
@@ -61,6 +67,7 @@ int main() {
       }
     }
     assert(!pageTransition.active());
+    assert(preparations == 1);
     for (int y = 0; y < 240; ++y)
       for (int x = 0; x < 240; ++x)
         assert(display.pixels[y * 240 + x] == target(x, y));
