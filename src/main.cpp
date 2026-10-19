@@ -1038,20 +1038,20 @@ void drawWeatherDisplay() {
   static TextDrawState title, location, temp, condition, humidity, wind, status, source;
   const bool full = displayNeedsFullRedraw;
   if (full) display.fillScreen(TFT_BLACK);
-  drawChangedText("Wetter", TFT_CYAN, {27, 120, 20, 2}, title, full);
-  drawChangedText(config.weatherName, TFT_WHITE, {52, 180, 20, 2}, location, full);
+  drawChangedText("Wetter", TFT_CYAN, DisplayLayout::WEATHER_TITLE, title, full);
+  drawChangedText(config.weatherName, TFT_WHITE, DisplayLayout::WEATHER_LOCATION, location, full);
   drawChangedText(weather.valid ? String(weather.temperature, 1) + " C" : "--.- C",
-                  TFT_WHITE, {84, 200, 30, 4}, temp, full);
+                  TFT_WHITE, DisplayLayout::WEATHER_TEMPERATURE, temp, full);
   drawChangedText(weather.valid ? weatherDescription(weather.code) : "Keine Wetterdaten",
-                  TFT_WHITE, {115, 210, 20, 2}, condition, full);
+                  TFT_WHITE, DisplayLayout::WEATHER_CONDITION, condition, full);
   drawChangedText(weather.valid ? "Feuchte " + String(weather.humidity, 0) + " %" : "",
-                  TFT_WHITE, {141, 200, 20, 2}, humidity, full);
+                  TFT_WHITE, DisplayLayout::WEATHER_HUMIDITY, humidity, full);
   drawChangedText(weather.valid ? "Wind " + String(weather.wind, 0) + " km/h" : "",
-                  TFT_WHITE, {165, 180, 20, 2}, wind, full);
+                  TFT_WHITE, DisplayLayout::WEATHER_WIND, wind, full);
   const String state = !config.weatherName.length() ? "Standort in Einstellungen" :
       (WiFi.status() != WL_CONNECTED ? "WLAN getrennt" : weather.state);
-  drawChangedText(state, TFT_WHITE, {188, 158, 14, 1}, status, full);
-  drawChangedText("Open-Meteo", TFT_DARKGREY, {207, 108, 12, 1}, source, full);
+  drawChangedText(state, TFT_WHITE, DisplayLayout::WEATHER_STATUS, status, full);
+  drawChangedText("Open-Meteo", TFT_DARKGREY, DisplayLayout::WEATHER_SOURCE, source, full);
   displayNeedsFullRedraw = false;
   displayDirty = false;
 }

@@ -14,4 +14,15 @@ int main() {
   }
   for (unsigned i = 1; i < sizeof(areas) / sizeof(areas[0]); ++i)
     assert(areas[i - 1].y + areas[i - 1].height / 2 < areas[i].y - areas[i].height / 2);
+  const TextArea weatherAreas[] = {WEATHER_TITLE, WEATHER_LOCATION, WEATHER_TEMPERATURE,
+      WEATHER_CONDITION, WEATHER_HUMIDITY, WEATHER_WIND, WEATHER_STATUS, WEATHER_SOURCE};
+  for (const TextArea &area : weatherAreas) {
+    // Gesamte rechteckige Textfläche, einschliesslich Löschbereich, im Kreis.
+    const int x = area.width / 2;
+    const int y = abs(area.y - 120) + area.height / 2;
+    assert(x * x + y * y < 112 * 112);
+  }
+  for (unsigned i = 1; i < sizeof(weatherAreas) / sizeof(weatherAreas[0]); ++i)
+    assert(weatherAreas[i - 1].y + weatherAreas[i - 1].height / 2 <
+           weatherAreas[i].y - weatherAreas[i].height / 2);
 }
