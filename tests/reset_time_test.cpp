@@ -26,4 +26,16 @@ int main() {
   assert(std::string(out) == "-- --:--");
   formatResetRemaining(-1, epoch, out, sizeof(out));
   assert(std::string(out) == "-- --:--");
+  formatCozyResetRemaining(epoch + 2 * 86400 + 3 * 3600, epoch, out, sizeof(out));
+  assert(std::string(out) == "2 T 3 h");
+  formatCozyResetRemaining(epoch + 3600 + 18 * 60, epoch, out, sizeof(out));
+  assert(std::string(out) == "1 h 18 min");
+  formatCozyResetRemaining(epoch + 1, epoch, out, sizeof(out));
+  assert(std::string(out) == "1 min");
+  formatCozyResetRemaining(epoch - 1, epoch, out, sizeof(out));
+  assert(std::string(out) == "0 min");
+  formatCozyResetRemaining(epoch, 0, out, sizeof(out));
+  assert(std::string(out) == "--");
+  formatCozyResetRemaining(-1, epoch, out, sizeof(out));
+  assert(std::string(out) == "--");
 }

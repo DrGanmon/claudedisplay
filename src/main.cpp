@@ -51,7 +51,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.8";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.9";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -150,12 +150,6 @@ String percentText(const LimitBucket &bucket, bool remaining = true) {
   if (!bucket.valid) return "--";
   const float value = remaining ? 100.0f - bucket.used : bucket.used;
   return String(constrain(value, 0.0f, 100.0f), 0);
-}
-
-uint16_t limitColor(float used) {
-  const float fraction = constrain(used, 0.0f, 100.0f) / 100.0f;
-  return display.color565(static_cast<uint8_t>(255.0f * fraction + 0.5f),
-                          static_cast<uint8_t>(255.0f * (1.0f - fraction) + 0.5f), 0);
 }
 
 void normalizeClaudeConfig() {
@@ -987,40 +981,53 @@ struct RingDrawState {
   bool valid = false;
 };
 
-uint16_t consumedRingColor(float used) {
-  const float fraction = constrain(used, 0.0f, 100.0f) / 100.0f;
-  // Gleichmäßiger Übergang: Grau (#808080) -> kräftiges Rot (#FF0000).
-  const uint8_t red = static_cast<uint8_t>(128.0f + 127.0f * fraction + 0.5f);
-  const uint8_t other = static_cast<uint8_t>(128.0f * (1.0f - fraction) + 0.5f);
-  return display.color565(red, other, other);
+uint16_t cozyLimitColor(float used, uint16_t base) {
+  // Only near exhaustion, gently shift honey/sage towards warm apricot.
+  const float blend = constrain((used - 75.0f) / 25.0f, 0.0f, 1.0f);
+  const uint16_t apricot = 0xFBAE;
+  const int r = (base >> 11) & 31, g = (base >> 5) & 63, b = base & 31;
+  return static_cast<uint16_t>(
+      (static_cast<int>(r + (((apricot >> 11) & 31) - r) * blend) << 11) |
+      (static_cast<int>(g + (((apricot >> 5) & 63) - g) * blend) << 5) |
+       static_cast<int>(b + ((apricot & 31) - b) * blend));
 }
 
 void drawLimitRing(int radius, int thickness, const LimitBucket &bucket,
-                   RingDrawState &previous, bool fullRedraw) {
+                   RingDrawState &previous, bool fullRedraw, uint16_t baseColor) {
   const int inner = radius - thickness;
-  const int angle = bucket.valid
+  const int target = bucket.valid
       ? static_cast<int>(360.0f * constrain(100.0f - bucket.used, 0.0f, 100.0f) / 100.0f) : 0;
-  const uint16_t color = bucket.valid ? consumedRingColor(bucket.used) : TFT_DARKGREY;
   const bool reset = fullRedraw || bucket.valid != previous.valid;
+  // Small changes settle quickly; larger changes move gently over several frames.
+  const int angle = reset ? target : previous.angle + constrain(target - previous.angle, -6, 6);
+  const uint16_t color = bucket.valid ? cozyLimitColor(bucket.used, baseColor) : WeatherTheme::MUTED;
+  const uint16_t track = WeatherTheme::FRAME;
   if (reset) {
-    if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, color, TFT_BLACK, true);
-    if (angle > 0) display.drawArc(120, 120, radius, inner, 0, angle, TFT_GREEN, TFT_BLACK, true);
+    if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, track, TFT_BLACK, true);
+    if (angle > 0) display.drawArc(120, 120, radius, inner, 0, angle, color, TFT_BLACK, true);
   } else {
-    if (color != previous.color) {
-      // Der ganze verbrauchte Anteil ändert seine Farbe mit dem Verbrauch.
-      if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, color, TFT_BLACK, true);
-    } else if (angle < previous.angle) {
-      display.drawArc(120, 120, radius, inner, angle, previous.angle, color, TFT_BLACK, true);
-    }
-    if (angle > previous.angle) {
-      display.drawArc(120, 120, radius, inner, previous.angle, angle, TFT_GREEN, TFT_BLACK, true);
-    } else if (angle > 0 && (angle < previous.angle || color != previous.color)) {
-      display.drawArc(120, 120, radius, inner, max(0, angle - 1), angle, TFT_GREEN, TFT_BLACK, true);
-    }
+    if (angle < previous.angle)
+      display.drawArc(120, 120, radius, inner, angle, previous.angle, track, TFT_BLACK, true);
+    if (color != previous.color && angle > 0)
+      display.drawArc(120, 120, radius, inner, 0, angle, color, TFT_BLACK, true);
+    else if (angle > previous.angle)
+      display.drawArc(120, 120, radius, inner, previous.angle, angle, color, TFT_BLACK, true);
+    else if (angle > 0 && angle < previous.angle)
+      display.drawArc(120, 120, radius, inner, max(0, angle - 1), angle, color, TFT_BLACK, true);
   }
   previous.angle = angle;
   previous.color = color;
   previous.valid = bucket.valid;
+}
+
+void drawClaudeRings(bool fullRedraw = false) {
+  static RingDrawState sessionRing, weeklyRing;
+  static uint32_t lastFrame = 0;
+  const uint32_t now = millis();
+  if (!fullRedraw && now - lastFrame < 40) return;
+  lastFrame = now;
+  drawLimitRing(119, 15, sessionLimit, sessionRing, fullRedraw, WeatherTheme::HONEY);
+  drawLimitRing(98, 7, weeklyLimit, weeklyRing, fullRedraw, WeatherTheme::SAGE);
 }
 
 void drawDisplayName(int y = 58) {
@@ -1109,41 +1116,46 @@ void drawWeatherDisplay() {
 
 void drawDisplay() {
   if (weatherPage) { drawWeatherDisplay(); return; }
-  static RingDrawState sessionRing, weeklyRing;
-  static TextDrawState name, temperature, clock, session, weekly, network, trueConf;
+  static TextDrawState name, temperature, clock, session, sessionCountdown, weekly, weeklyCountdown, network, trueConf;
   const bool fullRedraw = displayNeedsFullRedraw;
   if (fullRedraw) display.fillScreen(TFT_BLACK);
 
-  drawLimitRing(119, 15, sessionLimit, sessionRing, fullRedraw);
-  drawLimitRing(98, 7, weeklyLimit, weeklyRing, fullRedraw);
-  drawChangedText(config.displayName, TFT_WHITE, DisplayLayout::NAME, name, fullRedraw);
+  drawClaudeRings(fullRedraw);
+  drawChangedText(config.displayName, WeatherTheme::CREAM, DisplayLayout::NAME, name, fullRedraw);
   const String temperatureText = isnan(temperatureC) ? "--.- C" : String(temperatureC, 1) + " C";
-  drawChangedText(temperatureText, TFT_WHITE, DisplayLayout::TEMPERATURE, temperature, fullRedraw);
+  drawChangedText(temperatureText, WeatherTheme::MUTED, DisplayLayout::TEMPERATURE, temperature, fullRedraw);
   char sessionReset[24], weeklyReset[24];
   const int64_t now = static_cast<int64_t>(time(nullptr));
-  char clockText[9] = "--:--:--";
+  char clockText[6] = "--:--";
   if (now >= 1577836800) {
     const time_t timestamp = static_cast<time_t>(now);
     struct tm localTime;
-    if (localtime_r(&timestamp, &localTime)) strftime(clockText, sizeof(clockText), "%H:%M:%S", &localTime);
+    if (localtime_r(&timestamp, &localTime)) strftime(clockText, sizeof(clockText), "%H:%M", &localTime);
   }
-  drawChangedText(clockText, TFT_WHITE, DisplayLayout::CLOCK, clock, fullRedraw);
-  formatResetRemaining(sessionLimit.valid ? sessionLimit.resetEpoch : -1, now, sessionReset, sizeof(sessionReset));
-  formatResetRemaining(weeklyLimit.valid ? weeklyLimit.resetEpoch : -1, now, weeklyReset, sizeof(weeklyReset));
-  drawChangedText("S " + percentText(sessionLimit) + "% " + sessionReset,
-                  sessionLimit.valid ? limitColor(sessionLimit.used) : TFT_WHITE,
+  drawChangedText(clockText, WeatherTheme::CREAM, DisplayLayout::CLOCK, clock, fullRedraw);
+  formatCozyResetRemaining(sessionLimit.valid ? sessionLimit.resetEpoch : -1, now, sessionReset, sizeof(sessionReset));
+  formatCozyResetRemaining(weeklyLimit.valid ? weeklyLimit.resetEpoch : -1, now, weeklyReset, sizeof(weeklyReset));
+  drawChangedText(String(F("Session ")) + percentText(sessionLimit) + F(" %"),
+                  cozyLimitColor(sessionLimit.used, WeatherTheme::HONEY),
                   DisplayLayout::SESSION, session, fullRedraw);
-  drawChangedText("W " + percentText(weeklyLimit) + "% " + weeklyReset,
-                  weeklyLimit.valid ? limitColor(weeklyLimit.used) : TFT_WHITE,
+  drawChangedText(String(F("Reset in ")) + sessionReset, WeatherTheme::MUTED,
+                  DisplayLayout::SESSION_RESET, sessionCountdown, fullRedraw);
+  drawChangedText(String(F("Woche ")) + percentText(weeklyLimit) + F(" %"),
+                  cozyLimitColor(weeklyLimit.used, WeatherTheme::SAGE),
                   DisplayLayout::WEEKLY, weekly, fullRedraw);
-  const String trueConfText = !config.trueConf.enabled ? String() : "TC " +
-      (trueConfResult.valid ? String(trueConfResult.unread) : String(F("--")));
-  drawChangedText(trueConfText, TFT_WHITE, DisplayLayout::TRUECONF, trueConf, fullRedraw);
-  // Schmale Zeile vollständig innerhalb des inneren Rings.
+  drawChangedText(String(F("Reset in ")) + weeklyReset, WeatherTheme::MUTED,
+                  DisplayLayout::WEEKLY_RESET, weeklyCountdown, fullRedraw);
+  const bool connected = claudeState == F("Verbunden");
+  const String statusText = config.trueConf.enabled
+      ? String(F("TC ")) + (trueConfResult.valid ? String(trueConfResult.unread) : String(F("--")))
+      : (connected ? String(F("Verbunden")) : String(F("Claude pruefen")));
+  drawChangedText(statusText, connected ? WeatherTheme::SAGE : WeatherTheme::MUTED,
+                  DisplayLayout::TRUECONF, trueConf, fullRedraw);
+  // Without prefix the complete IPv4 address fits the narrow circular footer.
   const String networkText = WiFi.status() == WL_CONNECTED
-      ? (config.showIp ? "IP " + WiFi.localIP().toString() : String())
-      : (wifiPortal ? String(F("AP 192.168.4.1")) : String(F("WLAN")));
-  drawChangedText(networkText, TFT_WHITE, DisplayLayout::NETWORK, network, fullRedraw);
+      ? (config.showIp ? WiFi.localIP().toString() : String())
+      : (wifiPortal ? String(F("AP 192.168.4.1")) : String(F("WLAN getrennt")));
+  drawChangedText(networkText, WeatherTheme::MUTED, DisplayLayout::NETWORK, network, fullRedraw);
   displayNeedsFullRedraw = false;
   displayDirty = false;
 }
@@ -1327,7 +1339,9 @@ void loop() {
     lastDisplayMs = millis();
     drawDisplay();
   }
-  if (weatherPage && !updateAuthenticated)
-    weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
+  if (!updateAuthenticated) {
+    if (weatherPage) weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
+    else drawClaudeRings();
+  }
   yield();
 }

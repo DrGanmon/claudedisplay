@@ -46,3 +46,13 @@ inline void formatResetRemaining(int64_t reset, int64_t now, char *out, size_t s
   snprintf(out, size, "%lld %02d:%02d", static_cast<long long>(minutes / 1440),
            static_cast<int>((minutes / 60) % 24), static_cast<int>(minutes % 60));
 }
+
+inline void formatCozyResetRemaining(int64_t reset, int64_t now, char *out, size_t size) {
+  if (reset < 0 || now < 1577836800) { snprintf(out, size, "--"); return; }
+  const int64_t minutes = reset > now ? (reset - now + 59) / 60 : 0;
+  if (minutes >= 1440)
+    snprintf(out, size, "%lld T %d h", static_cast<long long>(minutes / 1440), static_cast<int>((minutes / 60) % 24));
+  else if (minutes >= 60)
+    snprintf(out, size, "%d h %d min", static_cast<int>(minutes / 60), static_cast<int>(minutes % 60));
+  else snprintf(out, size, "%d min", static_cast<int>(minutes));
+}
