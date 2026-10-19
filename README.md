@@ -130,7 +130,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.6`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.7`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -172,7 +172,7 @@ Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3
 
 ### Speicher beim Seitenwechsel
 
-Ab `2026-10-20.4` werden Texte in wiederverwendeten, nur vier Pixel hohen 16-Bit-Streifen gezeichnet. Der größte angeforderte Textbildpuffer sinkt damit von 196×28×2 = 10.976 Bytes auf höchstens 210×4×2 = 1.680 Bytes (jeweils ohne kleinen Bibliotheks-/Allokator-Overhead). Schrift, Zentrierung und Farben bleiben gleich. Der letzte Teilstreifen wird auf die tatsächliche Resthöhe beschnitten; Viewport-Clipping für Seitenübergänge bleibt aktiv. Ohne verfügbaren Sprite-Speicher bleibt der bisherige direkte Zeichenpfad erhalten.
+Ab `2026-10-20.4` werden Texte in wiederverwendeten, nur vier Pixel hohen 16-Bit-Streifen gezeichnet. Der größte angeforderte Textbildpuffer sinkt damit von 196×28×2 = 10.976 Bytes auf höchstens 210×4×2 = 1.680 Bytes (jeweils ohne kleinen Bibliotheks-/Allokator-Overhead). Schrift, Zentrierung und Farben bleiben gleich. Der letzte Teilstreifen wird auf die tatsächliche Resthöhe beschnitten; Die Zeichenstreifen werden weiterhin auf den gültigen Displaybereich beschnitten. Ohne verfügbaren Sprite-Speicher bleibt der bisherige direkte Zeichenpfad erhalten.
 
 Claude filtert und speichert nur noch die tatsächlich genutzten `five_hour`- und `seven_day`-Limits. Die ungenutzten Opus-/Sonnet-Limitobjekte und ihre Resetstrings entfallen; auch der temporäre JSON-Baum wird dadurch kleiner. Der volle TLS-Empfangspuffer bleibt unverändert.
 
@@ -186,13 +186,9 @@ Ab `2026-10-19.9` passen die Claude- und Wetterseite farblich zusammen: Der äu�
 
 Neue Limitwerte bewegen die Ringe schrittweise zum Ziel (höchstens 25 Aktualisierungen/s); bei späteren Seitenwechseln erscheinen die gespeicherten Werte sofort. Beim ersten Anzeigen gültiger Werte nach dem Start füllt sich jeder Ring dagegen über 5 Sekunden mit sanftem Anlauf und Ausklang bis zum tatsächlichen Restkontingent. Ein Seitenwechsel pausiert diese erste Animation; beim Zurückkehren läuft sie weiter. Die Prozent- und Countdowntexte zeigen bereits die tatsächlichen Werte. TrueConf- und Wetter-Hintergrundabfragen warten während dieser ersten Füllanimation. Der frühere Rot-Grün-Blau-Weiß-Selbsttest samt zwei Sekunden Wartezeit entfällt ab `2026-10-19.13`; nach der Displayinitialisierung erscheint direkt die Verbindungsanzeige. Im Ruhezustand werden unveränderte Ringe nicht neu gezeichnet. Es wird kein zusätzlicher Bildpuffer angelegt. Bei deaktiviertem TrueConf zeigt die untere Statuszeile `Verbunden` oder `Claude pruefen`, sonst weiterhin den TC-Zähler. Die optionale IP-Adresse steht darunter ohne Präfix, damit sie vollständig in den Kreis passt. Ausführliche Fehlermeldungen stehen auf der Webseite.
 
-### Sanfter Seitenwechsel
+### Direkter Seitenwechsel
 
-Ab `2026-10-20.3` schließt sich beim Wechsel per Tap oder Doppeltap eine kreisförmige schwarze Blende zur Mitte. Anschließend öffnet sie sich wieder auf der neuen Seite. Das gilt auch für die Rückkehr von der Statusseite. Die Mindestdauer beträgt rund 560 ms; die tatsächliche Dauer hängt von der Zeichenzeit am Gerät ab. Ab `2026-10-20.5` wird die Animation pro tatsächlich gezeichnetem Schritt weitergeschaltet, damit langsames Zeichnen keine Öffnungsschritte mehr überspringt. Text und Ringe werden in den bereits offenen Kreisstreifen unmittelbar sichtbar. Ringberechnungen werden für Ausschnitte übersprungen, die den jeweiligen Ring einschließlich Kantenglättung nicht berühren.
-
-Die Blende nutzt keinen zweiten Bildschirmpuffer und liest keine Pixel vom Display zurück. Beim Schließen werden nur neu verdeckte Bereiche gelöscht. Ab `2026-10-20.6` wird die Zielseite im geschlossenen Zustand einmal vorbereitet: Texte, Layoutverweise und Ringzustände stammen anschließend aus dem gemeinsamen Cache. Das Wettericon wird einmal ohne Displayausgabe gezeichnet und während des Aufdeckens eingefroren. Beim Öffnen wird nicht mehr für jeden Ausschnitt die ganze Seite samt aller Ringbögen neu berechnet. Stattdessen werden die neuen Ringpixel direkt aus Radius, Winkel und gespeicherten Farben in einem höchstens 480 Bytes großen Zeilenpuffer berechnet, die betroffenen Textstreifen darüber gezeichnet und kleine Dekorationen ergänzt. Die Kreisstreifen werden von der Mitte abwechselnd nach oben und unten bearbeitet, statt oben beginnend. Nach dem Öffnen erhalten Claude-Ringe einmal die exakte Kantenglättung der Bibliothek, ohne die Seite zu löschen.
-
-Der Textcache hält dafür zusätzlich einen Layoutverweis pro Zeile. Es bleibt bei kleinen Puffern; ein vollständiges zweites Bild wird nicht gespeichert. Automatische API-Abfragen warten bis zum Ende des Übergangs; manuelle Claude-/TrueConf-Anforderungen werden vorgemerkt. Weitere kurze Taps während der Blende werden ignoriert, der lange WLAN-Reset bleibt verfügbar. Die normale Wetter-, Ring- oder WLAN-Animation läuft nach der Blende weiter. Die tatsächliche Geschwindigkeit und Flüssigkeit müssen zusätzlich am Gerät geprüft werden.
+Ab `2026-10-20.7` ist die kreisförmige Seitenblende entfernt. Beim Tap beziehungsweise Doppeltap wird die Zielseite einmal direkt gezeichnet, einschließlich der Rückkehr von der Statusseite. Die erste Ringfüllung über fünf Sekunden, kurze Übergänge bei neuen Limitwerten, Wetteranimationen und die pulsierende WLAN-Verbindungsanzeige bleiben erhalten. Der gemeinsame Textcache und die kleinen Textstreifenpuffer bleiben aktiv. Zusätzliche Blendenzustände, Layoutverweise im Textcache, der Ringpixel-Zeilenpuffer und die spezielle Blendenberechnung entfallen.
 
 ### Statusseite per Doppeltap
 
@@ -305,8 +301,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-20.6
-git push origin v2026-10-20.6
+git tag v2026-10-20.7
+git push origin v2026-10-20.7
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

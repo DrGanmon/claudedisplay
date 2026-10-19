@@ -14,8 +14,6 @@ harness = r'''
 #define F(value) value
 bool authenticated = true, forceClaudeRefresh = false;
 DisplayPages pages;
-bool transitioning = false;
-struct { bool active() const { return transitioning; } } pageTransition;
 bool responded = false, closed = false;
 bool requireSettingsAuth() { return authenticated; }
 void settingsResult(const char *) { responded = true; }
@@ -38,10 +36,6 @@ int main() {
   pages.update(TouchInput::Event::NONE, false, 850);
   handleTestSessionKey();
   assert(forceClaudeRefresh && responded && closed);
-  forceClaudeRefresh = responded = closed = false;
-  transitioning = true;
-  handleTestSessionKey();
-  assert(forceClaudeRefresh && responded && !closed);
 }
 '''
 # No fetchClaudeUsage stub: an accidental synchronous fetch fails compilation.
