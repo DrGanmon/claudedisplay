@@ -23,6 +23,7 @@
 #include "weather_animation.h"
 #include "touch_input.h"
 #include "tls_memory.h"
+#include "limit_ring_color.h"
 #include <umm_malloc/umm_heap_select.h>
 #include <memory>
 #include <time.h>
@@ -51,7 +52,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.9";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.11";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -978,6 +979,7 @@ void readSensor() {
 struct RingDrawState {
   int angle = 0;
   uint16_t color = TFT_DARKGREY;
+  uint16_t track = LimitRingColor::GREY;
   bool valid = false;
 };
 
@@ -1001,22 +1003,27 @@ void drawLimitRing(int radius, int thickness, const LimitBucket &bucket,
   // Small changes settle quickly; larger changes move gently over several frames.
   const int angle = reset ? target : previous.angle + constrain(target - previous.angle, -6, 6);
   const uint16_t color = bucket.valid ? cozyLimitColor(bucket.used, baseColor) : WeatherTheme::MUTED;
-  const uint16_t track = WeatherTheme::FRAME;
+  const float displayedUsed = angle == target ? bucket.used : 100.0f - angle / 3.6f;
+  const uint16_t track = bucket.valid ? LimitRingColor::consumed(displayedUsed) : LimitRingColor::GREY;
   if (reset) {
     if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, track, TFT_BLACK, true);
     if (angle > 0) display.drawArc(120, 120, radius, inner, 0, angle, color, TFT_BLACK, true);
   } else {
-    if (angle < previous.angle)
+    if (track != previous.track) {
+      if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, track, TFT_BLACK, true);
+    } else if (angle < previous.angle) {
       display.drawArc(120, 120, radius, inner, angle, previous.angle, track, TFT_BLACK, true);
+    }
     if (color != previous.color && angle > 0)
       display.drawArc(120, 120, radius, inner, 0, angle, color, TFT_BLACK, true);
     else if (angle > previous.angle)
       display.drawArc(120, 120, radius, inner, previous.angle, angle, color, TFT_BLACK, true);
-    else if (angle > 0 && angle < previous.angle)
+    else if (angle > 0 && (angle < previous.angle || track != previous.track))
       display.drawArc(120, 120, radius, inner, max(0, angle - 1), angle, color, TFT_BLACK, true);
   }
   previous.angle = angle;
   previous.color = color;
+  previous.track = track;
   previous.valid = bucket.valid;
 }
 

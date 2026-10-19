@@ -128,7 +128,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.9`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.11`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -170,7 +170,7 @@ Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3
 
 ### Gemütliche Claude-Anzeige
 
-Ab `2026-10-19.9` passen die Claude- und Wetterseite farblich zusammen: Der äußere Sessionring ist honigfarben, der innere Wochenring salbeifarben. Verbrauchte Anteile bleiben als dunkelbraune Spur sichtbar. Ab 75 % Verbrauch gehen die verbleibenden Anteile sanft in Apricot über. Name und die größere Uhr (`HH:MM`) erscheinen cremefarben, Sensortemperatur und Reset-Countdowns zurückhaltender. Session und Woche erhalten jeweils eine eigene kleine Countdownzeile.
+Ab `2026-10-19.9` passen die Claude- und Wetterseite farblich zusammen: Der äußere Sessionring ist honigfarben, der innere Wochenring salbeifarben. Verbrauchte Anteile bleiben ab `2026-10-19.11` bis einschließlich 50 % Verbrauch grau. Von 50 bis 75 % geht die Spur stufenlos in Cremegelb über, von 75 bis 100 % weiter in Cremerot. Erst bei 100 % ist Cremerot vollständig erreicht. Bei neuen Werten folgt die Spurfarbe der sanften Ringbewegung. Ohne gültige Limitdaten bleibt die Spur grau. Ab 75 % Verbrauch gehen die verbleibenden Anteile sanft in Apricot über. Name und die größere Uhr (`HH:MM`) erscheinen cremefarben, Sensortemperatur und Reset-Countdowns zurückhaltender. Session und Woche erhalten jeweils eine eigene kleine Countdownzeile.
 
 Neue Limitwerte bewegen die Ringe schrittweise zum Ziel (höchstens 25 Aktualisierungen/s); beim Seitenaufbau erscheinen sofort die gespeicherten Werte. Im Ruhezustand werden unveränderte Ringe nicht neu gezeichnet. Es wird kein zusätzlicher Bildpuffer angelegt. Bei deaktiviertem TrueConf zeigt die untere Statuszeile `Verbunden` oder `Claude pruefen`, sonst weiterhin den TC-Zähler. Die optionale IP-Adresse steht darunter ohne Präfix, damit sie vollständig in den Kreis passt. Ausführliche Fehlermeldungen stehen auf der Webseite.
 
@@ -271,8 +271,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.9
-git push origin v2026-10-19.9
+git tag v2026-10-19.11
+git push origin v2026-10-19.11
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.
