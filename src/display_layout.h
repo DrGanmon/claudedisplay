@@ -23,4 +23,15 @@ constexpr TextArea WEATHER_HUMIDITY = {170, 180, 16, 2};
 constexpr TextArea WEATHER_WIND = {190, 150, 16, 2};
 constexpr TextArea WEATHER_STATUS = {208, 118, 10, 1};
 constexpr TextArea WEATHER_SOURCE = {223, 64, 8, 1};
+// Statusseite verwendet dieselbe sichere Kreisfläche wie die Wetterseite.
+constexpr TextArea STATUS_TITLE = {30, 100, 18, 2};
+constexpr TextArea STATUS_LABEL = {49, 140, 10, 1};
+constexpr TextArea STATUS_SSID = {66, 166, 18, 2};
+constexpr TextArea STATUS_SIGNAL = {90, 196, 16, 2};
+constexpr TextArea STATUS_IP = {113, 200, 18, 2};
+constexpr TextArea STATUS_CHANNEL = {135, 192, 10, 1};
+constexpr TextArea STATUS_HEAP = {154, 180, 10, 1};
+constexpr TextArea STATUS_UPTIME = {173, 162, 10, 1};
+constexpr TextArea STATUS_VERSION = {192, 140, 10, 1};
+constexpr TextArea STATUS_HINT = {211, 106, 10, 1};
 }

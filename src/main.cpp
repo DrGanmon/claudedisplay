@@ -22,6 +22,7 @@
 #include "weather.h"
 #include "weather_animation.h"
 #include "touch_input.h"
+#include "display_pages.h"
 #include "tls_memory.h"
 #include "limit_ring_color.h"
 #include <umm_malloc/umm_heap_select.h>
@@ -52,7 +53,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.11";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.12";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -119,7 +120,7 @@ bool forceTrueConfRefresh = false;
 uint32_t webServerReadyMs = 0;
 
 WeatherResult weather;
-bool weatherPage = false;
+DisplayPages pages;
 bool forceWeatherRefresh = true;
 uint32_t lastWeatherMs = 0;
 
@@ -514,7 +515,7 @@ void handleSaveTrueConf() {
 }
 
 void refreshTrueConf() {
-  if (weatherPage) { forceTrueConfRefresh = true; return; }
+  if (pages.requestsPaused()) { forceTrueConfRefresh = true; return; }
   trueConfResult = fetchTrueConfUnread(config.trueConf);
   lastTrueConfMs = millis();
   forceTrueConfRefresh = false;
@@ -523,9 +524,9 @@ void refreshTrueConf() {
 
 void handleTestTrueConf() {
   if (!requireSettingsAuth()) return;
-  if (weatherPage) {
+  if (pages.requestsPaused()) {
     forceTrueConfRefresh = true;
-    settingsResult(F("TrueConf-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
+    settingsResult(F("TrueConf-Abfragen sind auf der Wetter- oder Statusseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
     return;
   }
   refreshTrueConf();
@@ -558,9 +559,9 @@ void fetchClaudeUsage();
 
 void handleTestSessionKey() {
   if (!requireSettingsAuth()) return;
-  if (weatherPage) {
+  if (pages.requestsPaused()) {
     forceClaudeRefresh = true;
-    settingsResult(F("Claude-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
+    settingsResult(F("Claude-Abfragen sind auf der Wetter- oder Statusseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
     return;
   }
   forceClaudeRefresh = true;
@@ -735,7 +736,7 @@ void setupWebServer() {
     doc["touch"]["raw_high"] = digitalRead(Pins::TOUCH) == HIGH;
     doc["touch"]["ready"] = touchInput.isArmed();
     doc["touch"]["pressed"] = touchInput.isPressed();
-    doc["display_page"] = weatherPage ? "weather" : "claude";
+    doc["display_page"] = pages.status() ? "status" : (pages.weather() ? "weather" : "claude");
     doc["free_heap"] = ESP.getFreeHeap();
     doc["max_free_block"] = ESP.getMaxFreeBlockSize();
     doc["heap_fragmentation"] = ESP.getHeapFragmentation();
@@ -888,7 +889,7 @@ void readBucket(JsonObjectConst root, const char *key, LimitBucket &bucket) {
 }
 
 void fetchClaudeUsage() {
-  if (weatherPage) { forceClaudeRefresh = true; return; }
+  if (pages.requestsPaused()) { forceClaudeRefresh = true; return; }
   normalizeClaudeConfig();
   if (WiFi.status() != WL_CONNECTED || !config.sessionKey.length()) {
     claudeState = config.sessionKey.length() ? "WLAN getrennt" : "sessionKey fehlt";
@@ -1121,8 +1122,47 @@ void drawWeatherDisplay() {
   displayDirty = false;
 }
 
+void drawStatusDisplay() {
+  static TextDrawState title, label, ssid, signal, ip, channel, heap, uptime, version, hint;
+  const bool full = displayNeedsFullRedraw;
+  if (full) {
+    display.fillScreen(TFT_BLACK);
+    display.drawCircle(120, 120, 117, WeatherTheme::FRAME);
+    display.drawCircle(120, 120, 115, WeatherTheme::FRAME);
+  }
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  drawChangedText(F("Status"), WeatherTheme::HONEY, DisplayLayout::STATUS_TITLE, title, full);
+  drawChangedText(connected ? F("DEIN WLAN") : F("WLAN GETRENNT"), WeatherTheme::MUTED,
+                  DisplayLayout::STATUS_LABEL, label, full);
+  const String ssidText = wifiPortal ? String(SETUP_AP) : WiFi.SSID();
+  drawChangedText(ssidText.length() ? ssidText : String(F("Kein WLAN gespeichert")), WeatherTheme::CREAM,
+                  DisplayLayout::STATUS_SSID, ssid, full);
+  const int rssi = connected ? WiFi.RSSI() : -100;
+  const String signalText = connected
+      ? String(F("Signal ")) + String(rssi) + F(" dBm / ") + String(constrain(2 * (rssi + 100), 0, 100)) + F(" %")
+      : String(F("Signal --"));
+  drawChangedText(signalText, WeatherTheme::SAGE, DisplayLayout::STATUS_SIGNAL, signal, full);
+  const String ipText = connected ? WiFi.localIP().toString() : (wifiPortal ? WiFi.softAPIP().toString() : String(F("--")));
+  drawChangedText(String(F("IP ")) + ipText, WeatherTheme::CREAM, DisplayLayout::STATUS_IP, ip, full);
+  drawChangedText(String(F("Kanal ")) + (connected ? String(WiFi.channel()) : String(F("--"))) +
+                  (time(nullptr) >= 1577836800 ? F("  |  Uhr synchron") : F("  |  Uhr wartet")),
+                  WeatherTheme::MUTED, DisplayLayout::STATUS_CHANNEL, channel, full);
+  drawChangedText(String(F("RAM ")) + String(ESP.getFreeHeap() / 1024) + F("K  |  Block ") +
+                  String(ESP.getMaxFreeBlockSize() / 1024) + F("K"),
+                  WeatherTheme::SKY, DisplayLayout::STATUS_HEAP, heap, full);
+  const uint32_t minutes = millis() / 60000UL;
+  drawChangedText(String(F("Laufzeit ")) + String(minutes / 1440) + F("T ") +
+                  String((minutes / 60) % 24) + F("h ") + String(minutes % 60) + F("min"),
+                  WeatherTheme::MUTED, DisplayLayout::STATUS_UPTIME, uptime, full);
+  drawChangedText(String(F("FW ")) + FIRMWARE_VERSION, WeatherTheme::MUTED, DisplayLayout::STATUS_VERSION, version, full);
+  drawChangedText(F("Tap zum Zurueck"), WeatherTheme::HONEY, DisplayLayout::STATUS_HINT, hint, full);
+  displayNeedsFullRedraw = false;
+  displayDirty = false;
+}
+
 void drawDisplay() {
-  if (weatherPage) { drawWeatherDisplay(); return; }
+  if (pages.status()) { drawStatusDisplay(); return; }
+  if (pages.weather()) { drawWeatherDisplay(); return; }
   static TextDrawState name, temperature, clock, session, sessionCountdown, weekly, weeklyCountdown, network, trueConf;
   const bool fullRedraw = displayNeedsFullRedraw;
   if (fullRedraw) display.fillScreen(TFT_BLACK);
@@ -1169,21 +1209,21 @@ void drawDisplay() {
 
 void handleTouch() {
   static bool wasArmed = false, wasPressed = false;
-  const TouchInput::Event event = touchInput.update(digitalRead(Pins::TOUCH) == HIGH, millis());
+  const bool rawPressed = digitalRead(Pins::TOUCH) == HIGH;
+  const TouchInput::Event event = touchInput.update(rawPressed, millis());
   if (touchInput.isArmed() && !wasArmed) Serial.println(F("Touch: LOW erkannt, Sensor bereit"));
   if (touchInput.isPressed() != wasPressed)
     Serial.println(touchInput.isPressed() ? F("Touch: gedrueckt (HIGH)") : F("Touch: losgelassen (LOW)"));
   wasArmed = touchInput.isArmed();
   wasPressed = touchInput.isPressed();
-  if (event == TouchInput::Event::SHORT_PRESS) {
-    weatherPage = !weatherPage;
-    if (!weatherPage) weatherAnimation.release();
+  if (pages.update(event, rawPressed || touchInput.isPressed(), millis())) {
+    if (!pages.weather()) weatherAnimation.release();
     displayNeedsFullRedraw = true;
-    Serial.println(weatherPage ? "Touch: Wetterseite" : "Touch: Claude-Seite");
+    Serial.println(pages.status() ? F("Touch: Statusseite") :
+                   (pages.weather() ? F("Touch: Wetterseite") : F("Touch: Claude-Seite")));
     drawDisplay();
-  } else if (event == TouchInput::Event::LONG_PRESS) {
-    touchResetRequested = true;
   }
+  if (event == TouchInput::Event::LONG_PRESS) touchResetRequested = true;
 }
 
 void handleLongTouch() {
@@ -1320,19 +1360,20 @@ void loop() {
 
   const uint32_t configuredIntervalMs = config.intervalSec * static_cast<uint32_t>(1000);
   const uint32_t intervalMs = max(Timing::CLAUDE_MIN_MS, configuredIntervalMs);
-  // Fällige Abrufe und manuelle Anforderungen während der Wetterseite behalten.
+  // Fällige Abrufe und manuelle Anforderungen auf Wetter-/Statusseite behalten.
   // Beim Zurückwechseln greifen die bisherigen Intervalle automatisch wieder.
-  if (!weatherPage && (forceClaudeRefresh || now - lastClaudeMs >= intervalMs)) {
+  if (!pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && (forceClaudeRefresh || now - lastClaudeMs >= intervalMs)) {
     forceClaudeRefresh = false;
     lastClaudeMs = now;
     fetchClaudeUsage();
   }
 
-  if (!weatherPage && config.trueConf.enabled && (forceTrueConfRefresh ||
+  if (!pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && config.trueConf.enabled && (forceTrueConfRefresh ||
       (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
        millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
 
-  if (WiFi.status() == WL_CONNECTED && config.weatherName.length() &&
+  if (!pages.status() && !pages.tapPending() && !touchInput.isPressed() &&
+      WiFi.status() == WL_CONNECTED && config.weatherName.length() &&
       (forceWeatherRefresh || millis() - lastWeatherMs >= 900000UL)) {
     forceWeatherRefresh = false;
     lastWeatherMs = millis();
@@ -1347,8 +1388,8 @@ void loop() {
     drawDisplay();
   }
   if (!updateAuthenticated) {
-    if (weatherPage) weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
-    else drawClaudeRings();
+    if (pages.weather()) weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
+    else if (!pages.status()) drawClaudeRings();
   }
   yield();
 }

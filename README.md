@@ -55,7 +55,9 @@ Zur Diagnose erscheinen im seriellen Monitor `Touch: LOW erkannt, Sensor bereit`
 
 Der TTP223 muss im Modus „aktiv HIGH, Tasterbetrieb“ arbeiten. Nach dem Start wartet die Firmware auf einen stabilen LOW-Ruhezustand und erkennt anschließend Berührungen fortlaufend. Ein HIGH während der Einschaltkalibrierung deaktiviert den Eingang nicht mehr dauerhaft. Seitenwechsel werden im seriellen Monitor als `Touch: Wetterseite` beziehungsweise `Touch: Claude-Seite` protokolliert. Während synchroner Netzwerkabrufe kann die Erkennung verzögert sein; sehr kurze Berührungen können dabei übersehen werden.
 
-- falls angeschlossen, kurz berühren: zwischen Claude-Anzeige und Wetterseite wechseln
+- falls angeschlossen, kurz berühren: zwischen Claude-Anzeige und Wetterseite wechseln (350 ms Wartezeit zur Doppeltap-Erkennung)
+- zweimal kurz berühren und loslassen, innerhalb von 350 ms: Statusseite öffnen
+- auf der Statusseite einmal kurz berühren und loslassen: sofort zur zuletzt geöffneten Claude- oder Wetterseite zurückkehren
 - falls angeschlossen, mindestens fünf Sekunden berühren: WLAN-Zugangsdaten löschen und ESP8266 neu starten
 - nach dem Neustart öffnet sich automatisch das Captive Portal zur Auswahl eines neuen WLANs
 - Claude-Zugang und übrige Gerätekonfiguration bleiben dabei erhalten
@@ -128,7 +130,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.11`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.12`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -173,6 +175,14 @@ Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3
 Ab `2026-10-19.9` passen die Claude- und Wetterseite farblich zusammen: Der äußere Sessionring ist honigfarben, der innere Wochenring salbeifarben. Verbrauchte Anteile bleiben ab `2026-10-19.11` bis einschließlich 50 % Verbrauch grau. Von 50 bis 75 % geht die Spur stufenlos in Cremegelb über, von 75 bis 100 % weiter in Cremerot. Erst bei 100 % ist Cremerot vollständig erreicht. Bei neuen Werten folgt die Spurfarbe der sanften Ringbewegung. Ohne gültige Limitdaten bleibt die Spur grau. Ab 75 % Verbrauch gehen die verbleibenden Anteile sanft in Apricot über. Name und die größere Uhr (`HH:MM`) erscheinen cremefarben, Sensortemperatur und Reset-Countdowns zurückhaltender. Session und Woche erhalten jeweils eine eigene kleine Countdownzeile.
 
 Neue Limitwerte bewegen die Ringe schrittweise zum Ziel (höchstens 25 Aktualisierungen/s); beim Seitenaufbau erscheinen sofort die gespeicherten Werte. Im Ruhezustand werden unveränderte Ringe nicht neu gezeichnet. Es wird kein zusätzlicher Bildpuffer angelegt. Bei deaktiviertem TrueConf zeigt die untere Statuszeile `Verbunden` oder `Claude pruefen`, sonst weiterhin den TC-Zähler. Die optionale IP-Adresse steht darunter ohne Präfix, damit sie vollständig in den Kreis passt. Ausführliche Fehlermeldungen stehen auf der Webseite.
+
+### Statusseite per Doppeltap
+
+Ab `2026-10-19.12` öffnen zwei kurze Berührungen mit Loslassen innerhalb von 350 ms eine zusätzliche Statusseite. Der erste Tap wechselt die normale Seite erst nach Ablauf dieses Zeitfensters; dadurch bleibt beim Doppeltap die richtige Ausgangsseite erhalten. Ein einfacher Tap auf der Statusseite führt beim Loslassen direkt zur zuletzt angezeigten Claude- oder Wetterseite zurück. Der lange Touch für den WLAN-Reset bleibt erhalten.
+
+Die Statusseite verwendet den runden Cozy-Rahmen mit Creme-, Honig-, Salbei- und Blautönen. Sie zeigt SSID, RSSI in dBm mit einem groben Prozentwert, IP-Adresse, WLAN-Kanal, Uhrsynchronisierung, freien RAM und größten zusammenhängenden Block, Laufzeit sowie Firmwareversion. Lange SSIDs werden an die verfügbare Kreisbreite angepasst. Im Setup-AP erscheinen dessen Name und IP-Adresse. Die Werte werden einmal pro Sekunde geprüft; nur geänderte Textzeilen werden neu gezeichnet. Der Signal-Prozentwert ist eine grobe Umrechnung von -100 bis -50 dBm, keine gemessene Datenrate.
+
+Automatische Claude-, TrueConf- und Wetterabfragen pausieren auf der Statusseite. Vorgemerkte Claude-/TrueConf-Abrufe bleiben erhalten und werden nach Rückkehr zur Claude-Seite wieder freigegeben. Auch während des Doppeltap-Zeitfensters und einer gehaltenen Berührung starten keine automatischen API-Abfragen. Bereits laufende synchrone Netzwerkaufrufe können die Touch-Erkennung weiterhin verzögern. `/api/status` meldet die Seite als `display_page: "status"`.
 
 ### Wetterseite einrichten
 
@@ -271,8 +281,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.11
-git push origin v2026-10-19.11
+git tag v2026-10-19.12
+git push origin v2026-10-19.12
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

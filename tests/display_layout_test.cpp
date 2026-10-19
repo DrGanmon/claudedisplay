@@ -25,4 +25,13 @@ int main() {
   for (unsigned i = 1; i < sizeof(weatherAreas) / sizeof(weatherAreas[0]); ++i)
     assert(weatherAreas[i - 1].y + weatherAreas[i - 1].height / 2 <
            weatherAreas[i].y - weatherAreas[i].height / 2);
+  const TextArea statusAreas[] = {STATUS_TITLE, STATUS_LABEL, STATUS_SSID, STATUS_SIGNAL,
+      STATUS_IP, STATUS_CHANNEL, STATUS_HEAP, STATUS_UPTIME, STATUS_VERSION, STATUS_HINT};
+  for (const TextArea &area : statusAreas) {
+    const int x = area.width / 2, y = abs(area.y - 120) + area.height / 2;
+    assert(x * x + y * y < 112 * 112);
+  }
+  for (unsigned i = 1; i < sizeof(statusAreas) / sizeof(statusAreas[0]); ++i)
+    assert(statusAreas[i - 1].y + statusAreas[i - 1].height / 2 <
+           statusAreas[i].y - statusAreas[i].height / 2);
 }
