@@ -130,7 +130,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.1`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.2`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -169,6 +169,12 @@ Die gemeldeten Werte `Heap 24264 Bytes, groesster Block 23016 Bytes` scheitern a
 Der serielle Monitor protokolliert jetzt `Claude TLS: DRAM=..., Block=...; IRAM=..., Block=...` ohne Zugangsdaten. `/api/status` liefert außerdem `max_free_block` und `heap_fragmentation` für den DRAM-Heap. Für die Nachprüfung neue Firmware installieren, Claude-Seite öffnen, den Test vormerken und danach Statusseite und seriellen Monitor prüfen. Ein Flash-Erase ist nicht erforderlich.
 
 Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3.0.0/esp8266wifi/bearssl-client-secure-class.html), [IRAM und zweiter Heap](https://arduino-esp8266.readthedocs.io/en/latest/mmu.html), [vergleichbarer SDK-Absturz in der Ratentabelle](https://github.com/espressif/ESP8266_NONOS_SDK/issues/320).
+
+### Speicher beim Seitenwechsel
+
+Ab `2026-10-20.2` teilen sich Claude-, Wetter-, Status- und WLAN-Verbindungsanzeige einen Textcache mit zehn Zeilenplätzen. Er speichert nur die zuletzt gezeichneten Texte und Farben der aktuell dargestellten Anzeige. Beim Wechsel wird jeder alte Zeilenzustand zerstört und neu angelegt, sodass auch reservierter Stringspeicher freigegeben wird. Der neue Bildschirm wird vollständig gezeichnet; unveränderte Zeilen derselben Anzeige behalten weiterhin ihren Cache. Auch der automatische Übergang zwischen WLAN-Animation und normaler Anzeige wechselt den Cache.
+
+Die letzten Mess- und API-Werte, Einstellungen sowie kleine Navigations- und Ringanimationszustände bleiben erhalten. Sie ermöglichen die Rückkehr ohne erneuten Abruf. Es gibt keinen vollständigen Bildschirmpuffer. Textzeilen-Sprites werden nach dem Zeichnen gelöscht; der Wetteranimationspuffer wird beim Verlassen der Wetterseite freigegeben. Der Programmcode liegt weiterhin im Flash beziehungsweise im zeitkritischen IRAM und wird nicht seitenweise geladen.
 
 ### Gemütliche Claude-Anzeige
 
@@ -287,8 +293,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-20.1
-git push origin v2026-10-20.1
+git tag v2026-10-20.2
+git push origin v2026-10-20.2
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

@@ -18,6 +18,7 @@
 #include "reset_time.h"
 #include "trueconf.h"
 #include "display_layout.h"
+#include "active_text_cache.h"
 #include "wifi_recovery.h"
 #include "wifi_pulse.h"
 #include "weather.h"
@@ -55,7 +56,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-20.1";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.2";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -1067,6 +1068,9 @@ struct TextDrawState {
   uint16_t color = TFT_WHITE;
 };
 
+using DisplayTextCache = ActiveTextCache<TextDrawState, 10>;
+DisplayTextCache activeTextCache;
+
 void drawChangedText(const String &text, uint16_t color, const DisplayLayout::TextArea &area,
                      TextDrawState &previous, bool fullRedraw) {
   if (!fullRedraw && text == previous.text && color == previous.color) return;
@@ -1103,8 +1107,15 @@ void drawChangedText(const String &text, uint16_t color, const DisplayLayout::Te
 }
 
 void drawWeatherDisplay() {
-  static TextDrawState title, location, temp, condition, humidity, wind, status, source;
-  const bool full = displayNeedsFullRedraw;
+  const bool full = activeTextCache.select(DisplayTextCache::Screen::WEATHER) || displayNeedsFullRedraw;
+  TextDrawState &title = activeTextCache[0];
+  TextDrawState &location = activeTextCache[1];
+  TextDrawState &temp = activeTextCache[2];
+  TextDrawState &condition = activeTextCache[3];
+  TextDrawState &humidity = activeTextCache[4];
+  TextDrawState &wind = activeTextCache[5];
+  TextDrawState &status = activeTextCache[6];
+  TextDrawState &source = activeTextCache[7];
   if (full) {
     display.fillScreen(TFT_BLACK);
     display.drawCircle(120, 120, 117, WeatherTheme::FRAME);
@@ -1137,8 +1148,17 @@ void drawWeatherDisplay() {
 }
 
 void drawStatusDisplay() {
-  static TextDrawState title, label, ssid, signal, ip, channel, heap, uptime, version, hint;
-  const bool full = displayNeedsFullRedraw;
+  const bool full = activeTextCache.select(DisplayTextCache::Screen::STATUS) || displayNeedsFullRedraw;
+  TextDrawState &title = activeTextCache[0];
+  TextDrawState &label = activeTextCache[1];
+  TextDrawState &ssid = activeTextCache[2];
+  TextDrawState &signal = activeTextCache[3];
+  TextDrawState &ip = activeTextCache[4];
+  TextDrawState &channel = activeTextCache[5];
+  TextDrawState &heap = activeTextCache[6];
+  TextDrawState &uptime = activeTextCache[7];
+  TextDrawState &version = activeTextCache[8];
+  TextDrawState &hint = activeTextCache[9];
   if (full) {
     display.fillScreen(TFT_BLACK);
     display.drawCircle(120, 120, 117, WeatherTheme::FRAME);
@@ -1176,9 +1196,14 @@ void drawStatusDisplay() {
 
 void drawWifiConnecting(bool force = false) {
   static uint32_t lastFrame = 0;
-  static TextDrawState name, title, state, ssid, hint, ip;
   const uint32_t now = millis();
-  const bool full = force || displayNeedsFullRedraw;
+  const bool full = activeTextCache.select(DisplayTextCache::Screen::WIFI) || force || displayNeedsFullRedraw;
+  TextDrawState &name = activeTextCache[0];
+  TextDrawState &title = activeTextCache[1];
+  TextDrawState &state = activeTextCache[2];
+  TextDrawState &ssid = activeTextCache[3];
+  TextDrawState &hint = activeTextCache[4];
+  TextDrawState &ip = activeTextCache[5];
   if (!full && now - lastFrame < WifiPulse::FRAME_MS) return;
   lastFrame = now;
   if (full) display.fillScreen(TFT_BLACK);
@@ -1205,8 +1230,16 @@ void drawDisplay() {
   if (WiFi.status() != WL_CONNECTED && !pages.status()) { drawWifiConnecting(); return; }
   if (pages.status()) { drawStatusDisplay(); return; }
   if (pages.weather()) { drawWeatherDisplay(); return; }
-  static TextDrawState name, temperature, clock, session, sessionCountdown, weekly, weeklyCountdown, network, trueConf;
-  const bool fullRedraw = displayNeedsFullRedraw;
+  const bool fullRedraw = activeTextCache.select(DisplayTextCache::Screen::CLAUDE) || displayNeedsFullRedraw;
+  TextDrawState &name = activeTextCache[0];
+  TextDrawState &temperature = activeTextCache[1];
+  TextDrawState &clock = activeTextCache[2];
+  TextDrawState &session = activeTextCache[3];
+  TextDrawState &sessionCountdown = activeTextCache[4];
+  TextDrawState &weekly = activeTextCache[5];
+  TextDrawState &weeklyCountdown = activeTextCache[6];
+  TextDrawState &network = activeTextCache[7];
+  TextDrawState &trueConf = activeTextCache[8];
   if (fullRedraw) display.fillScreen(TFT_BLACK);
 
   drawClaudeRings(fullRedraw);
