@@ -19,6 +19,7 @@
 #include "trueconf.h"
 #include "display_layout.h"
 #include "wifi_recovery.h"
+#include "wifi_pulse.h"
 #include "weather.h"
 #include "weather_animation.h"
 #include "touch_input.h"
@@ -54,7 +55,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.14";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.1";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -93,6 +94,7 @@ WeatherAnimation weatherAnimation(display);
 ESP8266WebServer web(80);
 std::unique_ptr<WiFiManager> wifiPortal;
 WifiRecovery wifiRecovery;
+WifiStartup wifiStartup;
 bool normalWebRunning = false;
 Adafruit_BME280 bme;
 Adafruit_BMP280 bmp;
@@ -1172,7 +1174,35 @@ void drawStatusDisplay() {
   displayDirty = false;
 }
 
+void drawWifiConnecting(bool force = false) {
+  static uint32_t lastFrame = 0;
+  static TextDrawState name, title, state, ssid, hint, ip;
+  const uint32_t now = millis();
+  const bool full = force || displayNeedsFullRedraw;
+  if (!full && now - lastFrame < WifiPulse::FRAME_MS) return;
+  lastFrame = now;
+  if (full) display.fillScreen(TFT_BLACK);
+  // Only the outer halo moves; all text stays inside radius 88.
+  for (int radius = 118; radius >= 94; radius -= 2)
+    display.drawArc(120, 120, radius, radius - 2, 0, 360,
+                    WifiPulse::color(now, radius), TFT_BLACK, false);
+  const bool portal = wifiPortal && wifiPortal->getConfigPortalActive();
+  drawChangedText(config.displayName, WeatherTheme::MUTED, DisplayLayout::WIFI_NAME, name, full);
+  drawChangedText(F("WLAN"), WeatherTheme::CREAM, DisplayLayout::WIFI_TITLE, title, full);
+  drawChangedText(portal ? F("In Ruhe einrichten") : F("Verbinde ..."), WeatherTheme::HONEY,
+                  DisplayLayout::WIFI_STATE, state, full);
+  drawChangedText(portal ? String(SETUP_AP) : WiFi.SSID(), WeatherTheme::CREAM,
+                  DisplayLayout::WIFI_SSID, ssid, full);
+  drawChangedText(portal ? F("Setup-WLAN ist bereit") : F("Einen Moment ..."), WeatherTheme::MUTED,
+                  DisplayLayout::WIFI_HINT, hint, full);
+  drawChangedText(portal ? String(F("AP 192.168.4.1")) : String(), WeatherTheme::SAGE,
+                  DisplayLayout::WIFI_IP, ip, full);
+  displayNeedsFullRedraw = false;
+  displayDirty = false;
+}
+
 void drawDisplay() {
+  if (WiFi.status() != WL_CONNECTED && !pages.status()) { drawWifiConnecting(); return; }
   if (pages.status()) { drawStatusDisplay(); return; }
   if (pages.weather()) { drawWeatherDisplay(); return; }
   static TextDrawState name, temperature, clock, session, sessionCountdown, weekly, weeklyCountdown, network, trueConf;
@@ -1262,6 +1292,17 @@ void handleLongTouch() {
 void connectWifi(bool trySavedWifi = true) {
   WiFi.persistent(true);
   WiFi.hostname(HOSTNAME);
+  if (trySavedWifi) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(); // Start saved credentials asynchronously; do not wait here.
+    lastWifiRetryMs = millis();
+    if (WiFi.SSID().length()) {
+      wifiStartup.begin(millis());
+      return;
+    }
+  }
+  wifiStartup.finish();
   wifiPortal.reset(new WiFiManager());
   WiFiManager &manager = *wifiPortal;
   manager.setHostname(HOSTNAME);
@@ -1270,19 +1311,11 @@ void connectWifi(bool trySavedWifi = true) {
   manager.setWiFiAutoReconnect(true);
   manager.setConnectTimeout(20);
   manager.setBreakAfterConfig(false);
-  manager.setAPCallback([](WiFiManager *wifiManager) {
-    display.fillScreen(TFT_BLACK);
-    display.setTextDatum(MC_DATUM);
-    display.setTextColor(TFT_WHITE, TFT_BLACK);
-    display.setTextFont(2);
-    display.drawString("Setup", 120, 90);
-    display.drawString("SSID:", 120, 120);
-    display.drawString(wifiManager->getConfigPortalSSID(), 120, 150);
-    drawDisplayName();
+  manager.setAPCallback([](WiFiManager *) {
+    displayNeedsFullRedraw = true;
   });
-  // Das Portal verwaltet bewusst nur WLAN. Claude-Daten werden später über /settings gepflegt.
-  if (trySavedWifi) manager.autoConnect(SETUP_AP, SETUP_AP_PASSWORD);
-  else manager.startConfigPortal(SETUP_AP, SETUP_AP_PASSWORD);
+  // The portal manages WiFi only and runs alongside the animation loop.
+  manager.startConfigPortal(SETUP_AP, SETUP_AP_PASSWORD);
   displayNeedsFullRedraw = true;
 }
 
@@ -1290,8 +1323,19 @@ void handleWifiRecovery() {
   if (wifiPortal) processWifiPortalIfRunning(*wifiPortal);
   const uint32_t now = millis();
   const bool connected = WiFi.status() == WL_CONNECTED;
+  static bool wasConnected = false;
+  if (connected != wasConnected) {
+    displayNeedsFullRedraw = true;
+    if (!connected) {
+      weatherAnimation.release();
+      sessionRing.startup.pause();
+      weeklyRing.startup.pause();
+    }
+    wasConnected = connected;
+  }
   const bool fallbackDue = wifiRecovery.needsPortal(connected, now);
   if (connected) {
+    wifiStartup.finish();
     if (wifiPortal) {
       stopWifiPortalIfRunning(*wifiPortal);
       wifiPortal.reset();
@@ -1299,11 +1343,15 @@ void handleWifiRecovery() {
       displayNeedsFullRedraw = true;
       forceClaudeRefresh = true;
     }
-    if (!normalWebRunning) setupWebServer();
+    if (!normalWebRunning) {
+      configTime(LOCAL_TIMEZONE, config.ntpServer.c_str());
+      forceClaudeRefresh = true;
+      setupWebServer();
+    }
     return;
   }
-  if (fallbackDue && !wifiPortal) {
-    Serial.println(F("WLAN seit 60 Sekunden getrennt; Setup-AP startet"));
+  if (!wifiPortal && (wifiStartup.needsPortal(now) || (!wifiStartup.active() && fallbackDue))) {
+    Serial.println(F("WLAN nicht erreichbar; Setup-AP startet"));
     web.stop();
     MDNS.end();
     normalWebRunning = false;
@@ -1313,7 +1361,7 @@ void handleWifiRecovery() {
     wifiPortal->startConfigPortal(SETUP_AP, SETUP_AP_PASSWORD);
     displayNeedsFullRedraw = true;
   }
-  if (now - lastWifiRetryMs >= Timing::WIFI_RETRY_MS && WiFi.SSID().length()) {
+  if (!wifiStartup.active() && now - lastWifiRetryMs >= Timing::WIFI_RETRY_MS && WiFi.SSID().length()) {
     lastWifiRetryMs = now;
     WiFi.reconnect();
   }
@@ -1334,12 +1382,7 @@ void setup() {
   // GC9A01 ist hier nur schreibend angeschlossen (kein MISO).
   pinMode(Pins::TOUCH, INPUT_PULLUP);
   Serial.println(F("Touch: D6/GPIO12 nach Displaystart als Eingang eingerichtet"));
-  display.fillScreen(TFT_BLACK);
-  display.setTextDatum(MC_DATUM);
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.setTextFont(2);
-  display.drawString("WLAN verbinden ...", 120, 120);
-  drawDisplayName();
+  drawWifiConnecting(true);
   Serial.println(F("Display initialisiert; WLAN-Verbindung startet"));
 
   connectWifi();
@@ -1372,13 +1415,13 @@ void loop() {
   const uint32_t intervalMs = max(Timing::CLAUDE_MIN_MS, configuredIntervalMs);
   // Fällige Abrufe und manuelle Anforderungen auf Wetter-/Statusseite behalten.
   // Beim Zurückwechseln greifen die bisherigen Intervalle automatisch wieder.
-  if (!pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && (forceClaudeRefresh || now - lastClaudeMs >= intervalMs)) {
+  if (WiFi.status() == WL_CONNECTED && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && (forceClaudeRefresh || now - lastClaudeMs >= intervalMs)) {
     forceClaudeRefresh = false;
     lastClaudeMs = now;
     fetchClaudeUsage();
   }
 
-  if (!claudeStartupActive() && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && config.trueConf.enabled && (forceTrueConfRefresh ||
+  if (WiFi.status() == WL_CONNECTED && !claudeStartupActive() && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && config.trueConf.enabled && (forceTrueConfRefresh ||
       (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
        millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
 
@@ -1398,7 +1441,10 @@ void loop() {
     drawDisplay();
   }
   if (!updateAuthenticated) {
-    if (pages.weather()) weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
+    if (WiFi.status() != WL_CONNECTED) {
+      if (!pages.status()) drawWifiConnecting();
+    }
+    else if (pages.weather()) weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
     else if (!pages.status()) drawClaudeRings();
   }
   yield();

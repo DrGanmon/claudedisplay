@@ -34,4 +34,12 @@ int main() {
   for (unsigned i = 1; i < sizeof(statusAreas) / sizeof(statusAreas[0]); ++i)
     assert(statusAreas[i - 1].y + statusAreas[i - 1].height / 2 <
            statusAreas[i].y - statusAreas[i].height / 2);
+  const TextArea wifiAreas[] = {WIFI_NAME, WIFI_TITLE, WIFI_STATE, WIFI_SSID, WIFI_HINT, WIFI_IP};
+  for (const TextArea &area : wifiAreas) {
+    const int x = area.width / 2, y = abs(area.y - 120) + area.height / 2;
+    assert(x * x + y * y < 88 * 88);
+  }
+  for (unsigned i = 1; i < sizeof(wifiAreas) / sizeof(wifiAreas[0]); ++i)
+    assert(wifiAreas[i - 1].y + wifiAreas[i - 1].height / 2 <
+           wifiAreas[i].y - wifiAreas[i].height / 2);
 }

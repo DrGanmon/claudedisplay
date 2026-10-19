@@ -34,4 +34,11 @@ constexpr TextArea STATUS_HEAP = {154, 180, 10, 1};
 constexpr TextArea STATUS_UPTIME = {173, 162, 10, 1};
 constexpr TextArea STATUS_VERSION = {192, 140, 10, 1};
 constexpr TextArea STATUS_HINT = {211, 106, 10, 1};
+// WLAN-Text bleibt innerhalb Radius 88; der animierte Halo beginnt bei 92.
+constexpr TextArea WIFI_NAME = {58, 104, 16, 2};
+constexpr TextArea WIFI_TITLE = {91, 144, 28, 4};
+constexpr TextArea WIFI_STATE = {121, 160, 18, 2};
+constexpr TextArea WIFI_SSID = {145, 148, 16, 2};
+constexpr TextArea WIFI_HINT = {165, 132, 10, 1};
+constexpr TextArea WIFI_IP = {182, 104, 10, 1};
 }

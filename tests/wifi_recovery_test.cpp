@@ -47,4 +47,14 @@ int main() {
   assert(!recovery.needsPortal(false, 0xFFFFFF00));
   assert(!recovery.needsPortal(false, static_cast<uint32_t>(0xFFFFFF00U + 59999U)));
   assert(recovery.needsPortal(false, static_cast<uint32_t>(0xFFFFFF00U + 60000U)));
+  WifiStartup startup;
+  assert(!startup.active() && !startup.needsPortal(20000));
+  startup.begin(100);
+  assert(startup.active() && !startup.needsPortal(20099));
+  assert(startup.needsPortal(20100));
+  startup.finish();
+  assert(!startup.active() && !startup.needsPortal(50000));
+  startup.begin(0xffffff00UL);
+  assert(!startup.needsPortal(static_cast<uint32_t>(0xffffff00UL + 19999)));
+  assert(startup.needsPortal(static_cast<uint32_t>(0xffffff00UL + 20000)));
 }

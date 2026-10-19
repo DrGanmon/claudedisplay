@@ -24,3 +24,17 @@ class WifiRecovery {
   bool disconnected = false;
   uint32_t since = 0;
 };
+
+// The initial connection attempt must not block the display's animation loop.
+class WifiStartup {
+ public:
+  void begin(uint32_t now) { waiting = true; since = now; }
+  void finish() { waiting = false; }
+  bool active() const { return waiting; }
+  bool needsPortal(uint32_t now) const {
+    return waiting && static_cast<uint32_t>(now - since) >= 20000;
+  }
+ private:
+  bool waiting = false;
+  uint32_t since = 0;
+};

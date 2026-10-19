@@ -130,13 +130,13 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.14`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-20.1`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
 Version `2026-10-17.11` behebt vorzeitig abgeschnittene Einstellungsseiten bei leeren Konfigurationswerten. Leere Servernamen, Organisations-IDs oder andere optionale Textfelder dürfen keinen leeren HTTP-Chunk auslösen, da dieser die Antwort beendet. Der TrueConf-Abschnitt zeigt deshalb auch vor der ersten Konfiguration alle Felder und beide Buttons vollständig an.
 
-Beim Neustart erscheint nach der Displayinitialisierung direkt „WLAN verbinden ...“. Der frühere Farb-Selbsttest ist ab `2026-10-19.13` entfernt; für den normalen Betrieb ist er nicht erforderlich. Der SPI-Takt beträgt 10 MHz. Der serielle Monitor mit 115200 Baud zeigt Firmwareversion, erwartete Display-Verdrahtung und den Beginn des WLAN-Aufbaus. Diese Meldungen bestätigen den Programmablauf, aber keine erfolgreiche Kommunikation mit dem Display.
+Beim Neustart erscheint nach der Displayinitialisierung die Cozy-Verbindungsanzeige mit einem sanft pulsierenden Lichtkranz in Honig, Salbei und gedämpftem Blau. Name, WLAN-Status und SSID bleiben ruhig in der Mitte stehen. Der frühere Farb-Selbsttest ist ab `2026-10-19.13` entfernt; für den normalen Betrieb ist er nicht erforderlich. Der SPI-Takt beträgt 10 MHz. Der serielle Monitor mit 115200 Baud zeigt Firmwareversion, erwartete Display-Verdrahtung und den Beginn des WLAN-Aufbaus. Diese Meldungen bestätigen den Programmablauf, aber keine erfolgreiche Kommunikation mit dem Display.
 
 Der Display-Name wird separat gespeichert und auch während des WLAN-Verbindungsaufbaus und im Setup angezeigt. Ein vollständig schwarzes Display trotz neuer Firmware deutet auf ein Problem mit Versorgung, Hintergrundbeleuchtung, Verkabelung oder dem verwendeten Displaymodul hin. Insbesondere `BL/LED`, gemeinsame Masse sowie CLK, MOSI, DC und RST entsprechend der Pin-Tabelle prüfen.
 
@@ -242,6 +242,12 @@ Die Statusseite zeigt:
 
 Das Captive Portal läuft nur solange keine funktionierende WLAN-Konfiguration vorhanden ist. Nach erfolgreicher Verbindung wird ausdrücklich auf reinen Clientbetrieb (`WIFI_STA`) umgeschaltet. Der normale Webserver bleibt anschließend dauerhaft im Heimnetz aktiv.
 
+### Pulsierende WLAN-Verbindungsanzeige
+
+Ab `2026-10-20.1` wird der erste WLAN-Verbindungsaufbau mit `WiFi.begin()` asynchron gestartet. Ein pulsierender Halo läuft mit höchstens 20 Aktualisierungen/s um den Textbereich; seine Farbe wechselt langsam zwischen Honig, Salbei und Blau. Die Animation zeichnet nur den äußeren Ringbereich und verwendet keinen zusätzlichen Bildpuffer. Auch bei späterem WLAN-Ausfall erscheint der Halo. Bei erfolgreicher Verbindung wird wieder die zuvor ausgewählte normale Seite angezeigt. Die Statusseite bleibt per Doppeltap erreichbar.
+
+Ohne gespeicherte SSID startet das Setup-Portal sofort, sonst nach 20 Sekunden erfolglosem Startversuch. Im Portal zeigt die Verbindungsanzeige `ClaudeDisplay-Setup` und `AP 192.168.4.1`. Der normale AP-Rückfall nach einem späteren Verbindungsausfall bleibt bei 60 Sekunden. Während der Verbindungssuche starten keine automatischen Claude-/TrueConf-Anfragen. Das Portal läuft parallel zur Animation; das Speichern neuer WLAN-Daten im WiFiManager kann wegen dessen internem synchronen Verbindungsversuch weiterhin vorübergehend pausieren.
+
 ### Automatischer AP-Rückfall bei WLAN-Ausfall
 
 Version `2026-10-17.16` behebt einen Absturz direkt nach erfolgreicher WLAN-Anmeldung: Ein WiFiManager ohne tatsächlich gestartetes Portal besitzt keinen Portal-Webserver. Die Firmware prüft deshalb Portalzustand und Server vor `process()` und `stopConfigPortal()`. Bei einer Neustartschleife der älteren Version die neue Firmware per USB mit `pio run -e d1_mini --target upload` installieren; ein Löschen des Flashs oder Dateisystems ist nicht erforderlich.
@@ -281,8 +287,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.14
-git push origin v2026-10-19.14
+git tag v2026-10-20.1
+git push origin v2026-10-20.1
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.
