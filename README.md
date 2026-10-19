@@ -130,13 +130,13 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.12`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.13`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
 Version `2026-10-17.11` behebt vorzeitig abgeschnittene Einstellungsseiten bei leeren Konfigurationswerten. Leere Servernamen, Organisations-IDs oder andere optionale Textfelder dürfen keinen leeren HTTP-Chunk auslösen, da dieser die Antwort beendet. Der TrueConf-Abschnitt zeigt deshalb auch vor der ersten Konfiguration alle Felder und beide Buttons vollständig an.
 
-Beim Neustart zeigt das Display vor dem WLAN-Verbindungsaufbau jeweils eine halbe Sekunde Rot, Grün, Blau und Weiß. Dieser Selbsttest läuft unabhängig von WLAN, Sensoren und Claude. Bleiben auch diese Flächen unsichtbar, liegt das Problem vor der normalen Statusanzeige. Der SPI-Takt ist zur Fehlersuche auf 10 MHz reduziert. Der serielle Monitor mit 115200 Baud zeigt Firmwareversion, erwartete Display-Verdrahtung und den Start des Selbsttests; diese Meldungen bestätigen den Programmablauf, aber keine erfolgreiche Kommunikation mit dem Display.
+Beim Neustart erscheint nach der Displayinitialisierung direkt „WLAN verbinden ...“. Der frühere Farb-Selbsttest ist ab `2026-10-19.13` entfernt; für den normalen Betrieb ist er nicht erforderlich. Der SPI-Takt beträgt 10 MHz. Der serielle Monitor mit 115200 Baud zeigt Firmwareversion, erwartete Display-Verdrahtung und den Beginn des WLAN-Aufbaus. Diese Meldungen bestätigen den Programmablauf, aber keine erfolgreiche Kommunikation mit dem Display.
 
 Der Display-Name wird separat gespeichert und auch während des WLAN-Verbindungsaufbaus und im Setup angezeigt. Ein vollständig schwarzes Display trotz neuer Firmware deutet auf ein Problem mit Versorgung, Hintergrundbeleuchtung, Verkabelung oder dem verwendeten Displaymodul hin. Insbesondere `BL/LED`, gemeinsame Masse sowie CLK, MOSI, DC und RST entsprechend der Pin-Tabelle prüfen.
 
@@ -174,7 +174,7 @@ Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3
 
 Ab `2026-10-19.9` passen die Claude- und Wetterseite farblich zusammen: Der äußere Sessionring ist honigfarben, der innere Wochenring salbeifarben. Verbrauchte Anteile bleiben ab `2026-10-19.11` bis einschließlich 50 % Verbrauch grau. Von 50 bis 75 % geht die Spur stufenlos in Cremegelb über, von 75 bis 100 % weiter in Cremerot. Erst bei 100 % ist Cremerot vollständig erreicht. Bei neuen Werten folgt die Spurfarbe der sanften Ringbewegung. Ohne gültige Limitdaten bleibt die Spur grau. Ab 75 % Verbrauch gehen die verbleibenden Anteile sanft in Apricot über. Name und die größere Uhr (`HH:MM`) erscheinen cremefarben, Sensortemperatur und Reset-Countdowns zurückhaltender. Session und Woche erhalten jeweils eine eigene kleine Countdownzeile.
 
-Neue Limitwerte bewegen die Ringe schrittweise zum Ziel (höchstens 25 Aktualisierungen/s); beim Seitenaufbau erscheinen sofort die gespeicherten Werte. Im Ruhezustand werden unveränderte Ringe nicht neu gezeichnet. Es wird kein zusätzlicher Bildpuffer angelegt. Bei deaktiviertem TrueConf zeigt die untere Statuszeile `Verbunden` oder `Claude pruefen`, sonst weiterhin den TC-Zähler. Die optionale IP-Adresse steht darunter ohne Präfix, damit sie vollständig in den Kreis passt. Ausführliche Fehlermeldungen stehen auf der Webseite.
+Neue Limitwerte bewegen die Ringe schrittweise zum Ziel (höchstens 25 Aktualisierungen/s); bei späteren Seitenwechseln erscheinen die gespeicherten Werte sofort. Beim ersten Anzeigen gültiger Werte nach dem Start füllt sich jeder Ring dagegen über 15 Sekunden mit sanftem Anlauf und Ausklang bis zum tatsächlichen Restkontingent. Ein Seitenwechsel pausiert diese erste Animation; beim Zurückkehren läuft sie weiter. Die Prozent- und Countdowntexte zeigen bereits die tatsächlichen Werte. TrueConf- und Wetter-Hintergrundabfragen warten während dieser ersten Füllanimation. Der frühere Rot-Grün-Blau-Weiß-Selbsttest samt zwei Sekunden Wartezeit entfällt ab `2026-10-19.13`; nach der Displayinitialisierung erscheint direkt die Verbindungsanzeige. Im Ruhezustand werden unveränderte Ringe nicht neu gezeichnet. Es wird kein zusätzlicher Bildpuffer angelegt. Bei deaktiviertem TrueConf zeigt die untere Statuszeile `Verbunden` oder `Claude pruefen`, sonst weiterhin den TC-Zähler. Die optionale IP-Adresse steht darunter ohne Präfix, damit sie vollständig in den Kreis passt. Ausführliche Fehlermeldungen stehen auf der Webseite.
 
 ### Statusseite per Doppeltap
 
@@ -281,8 +281,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.12
-git push origin v2026-10-19.12
+git tag v2026-10-19.13
+git push origin v2026-10-19.13
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

@@ -25,6 +25,7 @@
 #include "display_pages.h"
 #include "tls_memory.h"
 #include "limit_ring_color.h"
+#include "ring_startup.h"
 #include <umm_malloc/umm_heap_select.h>
 #include <memory>
 #include <time.h>
@@ -53,7 +54,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.12";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.13";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -978,11 +979,20 @@ void readSensor() {
 }
 
 struct RingDrawState {
+  RingStartup startup;
   int angle = 0;
   uint16_t color = TFT_DARKGREY;
   uint16_t track = LimitRingColor::GREY;
   bool valid = false;
 };
+
+RingDrawState sessionRing, weeklyRing;
+
+bool claudeStartupActive() {
+  return !pages.requestsPaused() &&
+      ((sessionLimit.valid && !sessionRing.startup.finished()) ||
+       (weeklyLimit.valid && !weeklyRing.startup.finished()));
+}
 
 uint16_t cozyLimitColor(float used, uint16_t base) {
   // Only near exhaustion, gently shift honey/sage towards warm apricot.
@@ -1002,9 +1012,12 @@ void drawLimitRing(int radius, int thickness, const LimitBucket &bucket,
       ? static_cast<int>(360.0f * constrain(100.0f - bucket.used, 0.0f, 100.0f) / 100.0f) : 0;
   const bool reset = fullRedraw || bucket.valid != previous.valid;
   // Small changes settle quickly; larger changes move gently over several frames.
-  const int angle = reset ? target : previous.angle + constrain(target - previous.angle, -6, 6);
+  const bool startup = bucket.valid && !previous.startup.finished();
+  if (!bucket.valid) previous.startup.pause();
+  const int angle = startup ? previous.startup.angle(target, millis()) :
+      (reset ? target : previous.angle + constrain(target - previous.angle, -6, 6));
   const uint16_t color = bucket.valid ? cozyLimitColor(bucket.used, baseColor) : WeatherTheme::MUTED;
-  const float displayedUsed = angle == target ? bucket.used : 100.0f - angle / 3.6f;
+  const float displayedUsed = startup || angle == target ? bucket.used : 100.0f - angle / 3.6f;
   const uint16_t track = bucket.valid ? LimitRingColor::consumed(displayedUsed) : LimitRingColor::GREY;
   if (reset) {
     if (angle < 360) display.drawArc(120, 120, radius, inner, angle, 360, track, TFT_BLACK, true);
@@ -1029,7 +1042,6 @@ void drawLimitRing(int radius, int thickness, const LimitBucket &bucket,
 }
 
 void drawClaudeRings(bool fullRedraw = false) {
-  static RingDrawState sessionRing, weeklyRing;
   static uint32_t lastFrame = 0;
   const uint32_t now = millis();
   if (!fullRedraw && now - lastFrame < 40) return;
@@ -1217,6 +1229,10 @@ void handleTouch() {
   wasArmed = touchInput.isArmed();
   wasPressed = touchInput.isPressed();
   if (pages.update(event, rawPressed || touchInput.isPressed(), millis())) {
+    if (pages.requestsPaused()) {
+      sessionRing.startup.pause();
+      weeklyRing.startup.pause();
+    }
     if (!pages.weather()) weatherAnimation.release();
     displayNeedsFullRedraw = true;
     Serial.println(pages.status() ? F("Touch: Statusseite") :
@@ -1318,12 +1334,6 @@ void setup() {
   // GC9A01 ist hier nur schreibend angeschlossen (kein MISO).
   pinMode(Pins::TOUCH, INPUT_PULLUP);
   Serial.println(F("Touch: D6/GPIO12 nach Displaystart als Eingang eingerichtet"));
-  // Sichtbarer Selbsttest vor WLAN und Claude: benötigt keine Netzwerkverbindung.
-  Serial.println(F("Display-Selbsttest: Rot, Gruen, Blau, Weiss"));
-  for (uint16_t color : {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE}) {
-    display.fillScreen(color);
-    delay(500);
-  }
   display.fillScreen(TFT_BLACK);
   display.setTextDatum(MC_DATUM);
   display.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -1368,11 +1378,11 @@ void loop() {
     fetchClaudeUsage();
   }
 
-  if (!pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && config.trueConf.enabled && (forceTrueConfRefresh ||
+  if (!claudeStartupActive() && !pages.requestsPaused() && !pages.tapPending() && !touchInput.isPressed() && config.trueConf.enabled && (forceTrueConfRefresh ||
       (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
        millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
 
-  if (!pages.status() && !pages.tapPending() && !touchInput.isPressed() &&
+  if (!claudeStartupActive() && !pages.status() && !pages.tapPending() && !touchInput.isPressed() &&
       WiFi.status() == WL_CONNECTED && config.weatherName.length() &&
       (forceWeatherRefresh || millis() - lastWeatherMs >= 900000UL)) {
     forceWeatherRefresh = false;
