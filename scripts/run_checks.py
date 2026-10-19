@@ -15,4 +15,5 @@ with tempfile.TemporaryDirectory(prefix="claudedisplay-tests-") as directory:
         ], check=True, cwd=root)
         subprocess.run([str(binary)], check=True, cwd=root)
         print(f"OK: {source.name}", flush=True)
-subprocess.run([sys.executable, str(root / "tests/settings_html_test.py")], check=True, cwd=root)
+for source in sorted((root / "tests").glob("*_test.py")):
+    subprocess.run([sys.executable, str(source)], check=True, cwd=root)

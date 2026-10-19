@@ -124,7 +124,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.4`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.5`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -147,6 +147,18 @@ Seit Version `2026-10-17.6` extrahiert die Firmware wie das PS1-Skript die erste
 Negative Fehlernummern stammen vom ESP8266-HTTPClient, nicht von Claude. `-4` bedeutet in der verwendeten Bibliothek „not connected“, bevor die HTTP-Antwort gelesen werden konnte. Seit Version `2026-10-17.4` verwenden Organisationssuche und Limit-Abruf einen TLS-Empfangspuffer von 16 KiB statt unbestätigt verkleinerter Puffer. HTTP/1.0 und `Accept-Encoding: identity` vermeiden Chunk-Framing beziehungsweise Kompression beim direkten JSON-Lesen aus dem Stream. Fehler zeigen den betroffenen Abruf, den HTTPClient-Fehlertext und bei Transportfehlern zusätzlich verfügbare TLS-Details und freien Heap. Erkannte Cloudflare-Challenges werden gesondert gemeldet.
 
 Hintergrund: [ESP8266-TLS-Puffer und MFLN](https://arduino-esp8266.readthedocs.io/en/latest/esp8266wifi/bearssl-client-secure-class.html#mfln-or-maximum-fragment-length-negotiation-saving-ram), [ArduinoJson mit HTTPClient](https://arduinojson.org/v7/how-to/use-arduinojson-with-httpclient/).
+
+### Claude-Test und TLS-Speicher
+
+Version `2026-10-19.5` entschärft einen beobachteten Absturz beim Claude-Verbindungstest: Der dekodierte Stack aus `2026-10-19.4` zeigt `Exception (29)` mit Nulladresse in `ieee80211_setup_ratetable`, während der Claude-TLS-Handshake läuft. Die lokale Disassemblierung zeigt dort eine ungeprüfte Speicherreservierung des WLAN-SDKs vor `memcpy`. Das spricht für Speichermangel; ein erfolgreicher Hardware-Nachtest steht noch aus.
+
+Der Button für den gespeicherten Session-Key merkt den Abruf jetzt vor und beendet zuerst die Webantwort und deren Clientverbindung. Der eigentliche Test läuft anschließend in der Hauptschleife. Ergebnis und Fehlerdetails stehen auf der Statusseite `/`. Auf der Wetterseite bleibt er bis zum Zurückwechseln vorgemerkt.
+
+Feste Meldungstexte liegen verstärkt im Flash. Vor beiden Claude-HTTPS-Abrufen (Organisationssuche und Limits) wird nach Anlage des Clients und der Header geprüft, ob mindestens 28.000 Bytes Heap und ein zusammenhängender Block von 18.000 Bytes verfügbar sind. Diese konservativen Grenzen lassen neben dem vollständigen 16-KiB-TLS-Empfangspuffer Platz für weitere TLS- und WLAN-Allokationen. Bei zu wenig Speicher erscheint ein Fehlerstatus statt eines gestarteten Handshakes. Das ist eine Schutzmaßnahme, keine Garantie gegen sämtliche SDK-Abstürze. Der Empfangspuffer wird nicht ohne MFLN verkleinert.
+
+Der serielle Monitor protokolliert `Claude TLS: Heap=..., groesster Block=...` ohne Zugangsdaten. `/api/status` liefert zusätzlich `max_free_block` und `heap_fragmentation`. Für die Nachprüfung neue Firmware installieren, Claude-Seite öffnen, den Test vormerken und danach Statusseite und seriellen Monitor prüfen. Ein Flash-Erase ist nicht erforderlich.
+
+Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3.0.0/esp8266wifi/bearssl-client-secure-class.html), [vergleichbarer SDK-Absturz in der Ratentabelle](https://github.com/espressif/ESP8266_NONOS_SDK/issues/320).
 
 ### Wetterseite einrichten
 
@@ -243,8 +255,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.4
-git push origin v2026-10-19.4
+git tag v2026-10-19.5
+git push origin v2026-10-19.5
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

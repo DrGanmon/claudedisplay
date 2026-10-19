@@ -35,7 +35,7 @@ bool postToken(const TrueConfConfig &config, const char *path, const JsonDocumen
   http.useHTTP10(true);
   http.setTimeout(15000);
   const String url = "https://" + config.host + ":" + String(config.port) + path;
-  if (!http.begin(client, url)) { error = "TrueConf: HTTPS konnte nicht starten"; return false; }
+  if (!http.begin(client, url)) { error = F("TrueConf: HTTPS konnte nicht starten"); return false; }
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept-Encoding", "identity");
   String body;
@@ -52,7 +52,7 @@ bool postToken(const TrueConfConfig &config, const char *path, const JsonDocumen
   const auto parseError = deserializeJson(response, http.getStream(), DeserializationOption::Filter(filter));
   http.end();
   if (parseError || !response[field].is<String>()) {
-    error = "TrueConf-Anmeldung: Antwort enthält kein gültiges Token/Code";
+    error = F("TrueConf-Anmeldung: Antwort enthält kein gültiges Token/Code");
     return false;
   }
   value = response[field].as<String>();
@@ -84,20 +84,20 @@ bool getToken(const TrueConfConfig &config, String &token, String &error) {
 }  // namespace
 
 String validateTrueConfConfig(const TrueConfConfig &config) {
-  if (!config.enabled) return "";
-  if (!config.host.length() || config.host.length() > 253) return "TrueConf-Servername fehlt oder ist zu lang";
+  if (!config.enabled) return F("");
+  if (!config.host.length() || config.host.length() > 253) return F("TrueConf-Servername fehlt oder ist zu lang");
   for (size_t i = 0; i < config.host.length(); ++i) {
     const char c = config.host[i];
     if (!isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '.')
-      return "TrueConf-Host: nur DNS-Name oder IPv4, ohne https://, Port oder Pfad";
+      return F("TrueConf-Host: nur DNS-Name oder IPv4, ohne https://, Port oder Pfad");
   }
-  if (!config.port) return "TrueConf-Port muss zwischen 1 und 65535 liegen";
+  if (!config.port) return F("TrueConf-Port muss zwischen 1 und 65535 liegen");
   if (!config.token.length() && (!config.username.length() || !config.password.length()))
-    return "TrueConf benötigt Benutzername und Passwort oder einen Bridge-JWT";
+    return F("TrueConf benötigt Benutzername und Passwort oder einen Bridge-JWT");
   uint8_t fingerprint[20];
   if (!config.insecure && !fingerprintBytes(config.fingerprint, fingerprint))
-    return "TrueConf benötigt einen SHA1-Zertifikatfingerprint (40 Hex-Zeichen) oder die aktivierte Option ohne Zertifikatsprüfung";
-  return "";
+    return F("TrueConf benötigt einen SHA1-Zertifikatfingerprint (40 Hex-Zeichen) oder die aktivierte Option ohne Zertifikatsprüfung");
+  return F("");
 }
 
 TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
@@ -105,7 +105,7 @@ TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
   if (!config.enabled) return result;
   result.state = validateTrueConfConfig(config);
   if (result.state.length()) return result;
-  if (WiFi.status() != WL_CONNECTED) { result.state = "TrueConf: WLAN getrennt"; return result; }
+  if (WiFi.status() != WL_CONNECTED) { result.state = F("TrueConf: WLAN getrennt"); return result; }
   // HTTP-Anmeldung und WSS laufen nacheinander, nie parallel zu Claude-TLS.
   String token;
   if (!getToken(config, token, result.state)) return result;
@@ -117,7 +117,7 @@ TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
   auto send = [&](JsonDocument &doc) {
     String message;
     serializeJson(doc, message);
-    if (!socket.sendTXT(message)) { result.state = "TrueConf: Senden fehlgeschlagen"; finished = true; }
+    if (!socket.sendTXT(message)) { result.state = F("TrueConf: Senden fehlgeschlagen"); finished = true; }
   };
   auto getPage = [&]() {
     JsonDocument request;
@@ -135,9 +135,9 @@ TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
     filter["errorCode"] = true;
     filter["payload"]["errorCode"] = true;
     filter["payload"]["userId"] = true;
-    if (length > 8192) { result.state = "TrueConf: Antwort größer als 8 KiB"; finished = true; return; }
+    if (length > 8192) { result.state = F("TrueConf: Antwort größer als 8 KiB"); finished = true; return; }
     if (deserializeJson(doc, static_cast<const uint8_t *>(payload), length, DeserializationOption::Filter(filter))) {
-      result.state = "TrueConf: Ungültige JSON-Antwort"; finished = true; return;
+      result.state = F("TrueConf: Ungültige JSON-Antwort"); finished = true; return;
     }
     // Ereignisse absichtlich NICHT bestätigen: ACK kann als Gelesenmarkierung wirken.
     if ((doc["type"] | 0) != 2 || (doc["id"] | 0U) != requestId) return;
@@ -147,7 +147,7 @@ TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
     }
     if (requestId == 1) {
       if (!doc["payload"]["userId"].is<String>()) {
-        result.state = "TrueConf: Anmeldung nicht bestätigt"; finished = true; return;
+        result.state = F("TrueConf: Anmeldung nicht bestätigt"); finished = true; return;
       }
       getPage(); return;
     }
@@ -157,16 +157,16 @@ TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
     // Durchlauf nicht verändern, da anschließend die Chat-Zähler gelesen werden.
     doc.clear();
     if (deserializeJson(doc, static_cast<const uint8_t *>(payload), length, DeserializationOption::Filter(filter))) {
-      result.state = "TrueConf: Chat-Antwort ungültig"; finished = true; return;
+      result.state = F("TrueConf: Chat-Antwort ungültig"); finished = true; return;
     }
     size_t count = 0;
     if (!trueConfAccumulatePage(doc, total, count)) {
-      result.state = "TrueConf: Chat-Zähler fehlen oder sind ungültig"; finished = true; return;
+      result.state = F("TrueConf: Chat-Zähler fehlen oder sind ungültig"); finished = true; return;
     }
     if (count < PAGE_SIZE) {
-      result.unread = total; result.valid = true; result.state = "Verbunden"; finished = true;
+      result.unread = total; result.valid = true; result.state = F("Verbunden"); finished = true;
     } else if (++page > 1000) {
-      result.state = "TrueConf: Zu viele Chats; kein vollständiger Zähler"; finished = true;
+      result.state = F("TrueConf: Zu viele Chats; kein vollständiger Zähler"); finished = true;
     } else getPage();
   };
   socket.onEvent([&](WStype_t type, uint8_t *payload, size_t length) {
@@ -179,18 +179,18 @@ TrueConfResult fetchTrueConfUnread(const TrueConfConfig &config) {
     else if (type == WStype_FRAGMENT_TEXT_START || type == WStype_FRAGMENT || type == WStype_FRAGMENT_FIN) {
       if (type == WStype_FRAGMENT_TEXT_START) fragments = "";
       if (fragments.length() + length > 8192 || !fragments.concat(reinterpret_cast<char *>(payload), length)) {
-        result.state = "TrueConf: Nachricht zu groß / Speicher knapp"; finished = true; return;
+        result.state = F("TrueConf: Nachricht zu groß / Speicher knapp"); finished = true; return;
       }
       if (type == WStype_FRAGMENT_FIN) { response(reinterpret_cast<uint8_t *>(&fragments[0]), fragments.length()); fragments = ""; }
     } else if (type == WStype_DISCONNECTED || type == WStype_ERROR) {
-      result.state = "TrueConf: WSS getrennt (Host, Port, Zertifikat oder Antwortgröße prüfen)"; finished = true;
+      result.state = F("TrueConf: WSS getrennt (Host, Port, Zertifikat oder Antwortgröße prüfen)"); finished = true;
     }
   });
   uint8_t fingerprint[20];
   fingerprintBytes(config.fingerprint, fingerprint);
   beginTrueConfSocket(socket, config.host.c_str(), config.port,
                      config.insecure ? nullptr : fingerprint);
-  result.state = "TrueConf: Zeitüberschreitung";
+  result.state = F("TrueConf: Zeitüberschreitung");
   const uint32_t started = millis();
   while (!finished && millis() - started < 30000) { socket.loop(); delay(1); }
   finished = true;

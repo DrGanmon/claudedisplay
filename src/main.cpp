@@ -22,6 +22,7 @@
 #include "weather.h"
 #include "weather_animation.h"
 #include "touch_input.h"
+#include "tls_memory.h"
 #include <memory>
 #include <time.h>
 
@@ -45,7 +46,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.4";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.5";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -312,7 +313,7 @@ void handleStatus() {
   web.sendContent(F(" dBm<br>Freier Heap: "));
   web.sendContent(String(ESP.getFreeHeap()));
   web.sendContent(F(" Bytes</p></div><div class='card'><h2>TrueConf</h2><p>Ungelesene Nachrichten: "));
-  web.sendContent(trueConfResult.valid ? String(trueConfResult.unread) : String("--"));
+  web.sendContent(trueConfResult.valid ? String(trueConfResult.unread) : String(F("--")));
   web.sendContent(F("<br>Status: "));
   sendHtmlEscaped(trueConfResult.state);
   web.sendContent(F("</p></div>"));
@@ -427,18 +428,18 @@ void handleSaveWeather() {
   const bool disabled = !name.length() && !lat.length() && !lon.length();
   if (!disabled && (!name.length() || name.length() > 40 ||
       !validWeatherCoordinate(lat.c_str(), 90) || !validWeatherCoordinate(lon.c_str(), 180))) {
-    settingsResult("Bitte Ortsname und gültige Koordinaten mit Dezimalpunkt eingeben."); return;
+    settingsResult(F("Bitte Ortsname und gültige Koordinaten mit Dezimalpunkt eingeben.")); return;
   }
   const Config previous = config;
   config.weatherName = name; config.weatherLatitude = lat; config.weatherLongitude = lon;
   if (!saveConfig()) {
     config = previous;
-    settingsResult("Wetter-Standort konnte nicht gespeichert werden."); return;
+    settingsResult(F("Wetter-Standort konnte nicht gespeichert werden.")); return;
   }
   weather = WeatherResult();
   forceWeatherRefresh = true;
   displayNeedsFullRedraw = true;
-  settingsResult("Wetter-Standort gespeichert.");
+  settingsResult(F("Wetter-Standort gespeichert."));
 }
 
 void handleSaveDisplayName() {
@@ -446,7 +447,7 @@ void handleSaveDisplayName() {
   String name = web.arg("displayName");
   name.trim();
   if (!name.length() || name.length() > 24) {
-    settingsResult("Bitte einen Display-Namen mit 1 bis 24 Bytes eingeben (Umlaute benötigen mehrere Bytes).");
+    settingsResult(F("Bitte einen Display-Namen mit 1 bis 24 Bytes eingeben (Umlaute benötigen mehrere Bytes)."));
     return;
   }
   const String previous = config.displayName;
@@ -455,7 +456,7 @@ void handleSaveDisplayName() {
   String ntp = web.arg("ntpServer");
   ntp.trim();
   if (!ntp.length() || ntp.length() > 253 || ntp.indexOf('/') >= 0 || ntp.indexOf(' ') >= 0) {
-    settingsResult("Bitte einen gültigen NTP-Servernamen eingeben.");
+    settingsResult(F("Bitte einen gültigen NTP-Servernamen eingeben."));
     return;
   }
   config.displayName = name;
@@ -465,12 +466,12 @@ void handleSaveDisplayName() {
     config.displayName = previous;
     config.showIp = previousShowIp;
     config.ntpServer = previousNtp;
-    settingsResult("Display-Einstellungen konnten nicht gespeichert werden.");
+    settingsResult(F("Display-Einstellungen konnten nicht gespeichert werden."));
     return;
   }
   displayDirty = true;
   configTime(LOCAL_TIMEZONE, config.ntpServer.c_str());
-  settingsResult("Display-Einstellungen gespeichert. Die Anzeige wird sofort aktualisiert.");
+  settingsResult(F("Display-Einstellungen gespeichert. Die Anzeige wird sofort aktualisiert."));
 }
 
 void handleSaveTrueConf() {
@@ -481,7 +482,7 @@ void handleSaveTrueConf() {
   const long port = web.arg("port").toInt();
   const long interval = web.arg("intervalSec").toInt();
   if (port < 1 || port > 65535 || interval < 30 || interval > 3600) {
-    settingsResult("TrueConf-Port oder Intervall außerhalb des gültigen Bereichs."); return;
+    settingsResult(F("TrueConf-Port oder Intervall außerhalb des gültigen Bereichs.")); return;
   }
   next.port = port;
   next.intervalSec = interval;
@@ -495,7 +496,7 @@ void handleSaveTrueConf() {
   if (web.arg("token").length()) { next.token = web.arg("token"); next.token.trim(); }
   if (next.host.length() > 253 || next.username.length() > 254 || next.oauthClientId.length() > 254 ||
       next.password.length() > 512 || next.token.length() > 4096 || next.fingerprint.length() > 80) {
-    settingsResult("TrueConf-Eingabe zu lang."); return;
+    settingsResult(F("TrueConf-Eingabe zu lang.")); return;
   }
   const String error = validateTrueConfConfig(next);
   if (error.length()) { settingsResult(error); return; }
@@ -503,13 +504,13 @@ void handleSaveTrueConf() {
   config.trueConf = next;
   if (!saveConfig()) {
     config.trueConf = previous;
-    settingsResult("TrueConf-Einstellungen konnten nicht gespeichert werden."); return;
+    settingsResult(F("TrueConf-Einstellungen konnten nicht gespeichert werden.")); return;
   }
   trueConfResult = TrueConfResult();
   trueConfResult.state = next.enabled ? "Warte auf Abruf" : "Deaktiviert";
   forceTrueConfRefresh = next.enabled;
   displayDirty = true;
-  settingsResult("TrueConf-Einstellungen dauerhaft gespeichert.");
+  settingsResult(F("TrueConf-Einstellungen dauerhaft gespeichert."));
 }
 
 void refreshTrueConf() {
@@ -524,7 +525,7 @@ void handleTestTrueConf() {
   if (!requireSettingsAuth()) return;
   if (weatherPage) {
     forceTrueConfRefresh = true;
-    settingsResult("TrueConf-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel.");
+    settingsResult(F("TrueConf-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
     return;
   }
   refreshTrueConf();
@@ -535,22 +536,22 @@ void handleTestTrueConf() {
 void handleChangePassword() {
   if (!requireSettingsAuth()) return;
   if (web.arg("currentPassword") != config.webPassword) {
-    settingsResult("Das aktuelle Passwort ist falsch.");
+    settingsResult(F("Das aktuelle Passwort ist falsch."));
     return;
   }
   const String password = web.arg("webPassword");
   if (password.length() < 8 || password != web.arg("confirmPassword")) {
-    settingsResult("Das neue Passwort muss mindestens 8 Zeichen lang sein und die Bestätigung muss übereinstimmen.");
+    settingsResult(F("Das neue Passwort muss mindestens 8 Zeichen lang sein und die Bestätigung muss übereinstimmen."));
     return;
   }
   const String previous = config.webPassword;
   config.webPassword = password;
   if (!saveConfig()) {
     config.webPassword = previous;
-    settingsResult("Passwort konnte nicht gespeichert werden.");
+    settingsResult(F("Passwort konnte nicht gespeichert werden."));
     return;
   }
-  settingsResult("Passwort geändert. Bei der nächsten Anmeldung Benutzer admin und das neue Passwort verwenden.");
+  settingsResult(F("Passwort geändert. Bei der nächsten Anmeldung Benutzer admin und das neue Passwort verwenden."));
 }
 
 void fetchClaudeUsage();
@@ -559,16 +560,12 @@ void handleTestSessionKey() {
   if (!requireSettingsAuth()) return;
   if (weatherPage) {
     forceClaudeRefresh = true;
-    settingsResult("Claude-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel.");
+    settingsResult(F("Claude-Abfragen sind auf der Wetterseite pausiert. Der Abruf folgt nach dem Seitenwechsel."));
     return;
   }
-  forceClaudeRefresh = false;
-  fetchClaudeUsage();
-  lastClaudeMs = millis();
-  displayDirty = true;
-  settingsResult(claudeState == "Verbunden"
-      ? String("Test erfolgreich: Der gespeicherte Session-Key funktioniert. Claude-Limits wurden aktualisiert.")
-      : String("Test fehlgeschlagen: ") + claudeState);
+  forceClaudeRefresh = true;
+  settingsResult(F("Claude-Test vorgemerkt. Der Abruf startet nach Abschluss dieser Webanfrage. Ergebnis und Fehlerdetails stehen auf der Statusseite."));
+  web.client().stop();
 }
 
 void handleSaveSettings() {
@@ -587,7 +584,7 @@ void handleSaveSettings() {
   normalizeClaudeConfig();
   if (config.orgId.length() && findOrganizationUuid(config.orgId.c_str(), config.orgId.length()) != 0) {
     config = previous;
-    settingsResult("Nicht gespeichert: Die Organisations-ID muss eine UUID sein. Aus dem PS1 kann auch Name [UUID] übernommen werden. Leer lassen startet die automatische Suche.");
+    settingsResult(F("Nicht gespeichert: Die Organisations-ID muss eine UUID sein. Aus dem PS1 kann auch Name [UUID] übernommen werden. Leer lassen startet die automatische Suche."));
     return;
   }
   const bool ok = saveConfig();
@@ -736,6 +733,8 @@ void setupWebServer() {
       doc["weather"]["wind_kmh"] = weather.wind;
     }
     doc["free_heap"] = ESP.getFreeHeap();
+    doc["max_free_block"] = ESP.getMaxFreeBlockSize();
+    doc["heap_fragmentation"] = ESP.getHeapFragmentation();
     String body;
     serializeJson(doc, body);
     web.send(200, "application/json", body);
@@ -781,17 +780,17 @@ void applyClaudeHeaders(HTTPClient &http) {
 String httpErrorText(int code) {
   if (code < 0) return "Verbindungsfehler " + String(code) + ": " + HTTPClient::errorToString(code);
   switch (code) {
-    case 401: return "Sitzung abgelaufen (401)";
-    case 403: return "Zugriff/Cloudflare (403)";
-    case 404: return "Endpunkt nicht gefunden oder Organisation nicht zugänglich (404)";
-    case 429: return "Zu viele Anfragen (429)";
+    case 401: return F("Sitzung abgelaufen (401)");
+    case 403: return F("Zugriff/Cloudflare (403)");
+    case 404: return F("Endpunkt nicht gefunden oder Organisation nicht zugänglich (404)");
+    case 429: return F("Zu viele Anfragen (429)");
     default: return "HTTP-Fehler " + String(code);
   }
 }
 
 String claudeRequestError(int code, HTTPClient &http, BearSSL::WiFiClientSecure &client) {
   if (code == 403 && http.header("cf-mitigated").equalsIgnoreCase("challenge")) {
-    return "Cloudflare-Challenge (403). Weitere Cookies und User-Agent wie im PS1-Skript prüfen.";
+    return F("Cloudflare-Challenge (403). Weitere Cookies und User-Agent wie im PS1-Skript prüfen.");
   }
   String message = httpErrorText(code);
   if (code < 0) {
@@ -809,10 +808,22 @@ bool claudeResponseEncodingSupported(HTTPClient &http) {
   const String transfer = http.header("Transfer-Encoding");
   if ((encoding.length() && !encoding.equalsIgnoreCase("identity")) ||
       (transfer.length() && !transfer.equalsIgnoreCase("identity"))) {
-    claudeState = "Nicht unterstützte Antwortkodierung trotz HTTP/1.0 und Accept-Encoding: identity";
+    claudeState = F("Nicht unterstützte Antwortkodierung trotz HTTP/1.0 und Accept-Encoding: identity");
     return false;
   }
   return true;
+}
+
+bool prepareClaudeTlsRequest() {
+  weatherAnimation.release();
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t largestBlock = ESP.getMaxFreeBlockSize();
+  Serial.printf("Claude TLS: Heap=%lu, groesster Block=%lu\n",
+                static_cast<unsigned long>(freeHeap), static_cast<unsigned long>(largestBlock));
+  if (hasClaudeTlsMemory(freeHeap, largestBlock)) return true;
+  claudeState = F("Claude-Abruf ausgesetzt: zu wenig TLS-Speicher. Heap ");
+  claudeState += String(freeHeap) + F(" Bytes, groesster Block ") + String(largestBlock) + F(" Bytes");
+  return false;
 }
 
 bool discoverOrganization() {
@@ -823,10 +834,11 @@ bool discoverOrganization() {
   client.setBufferSizes(16384, 512);
   HTTPClient http;
   if (!http.begin(client, CLAUDE_BASE)) {
-    claudeState = "Organisationssuche: HTTPS konnte nicht starten";
+    claudeState = F("Organisationssuche: HTTPS konnte nicht starten");
     return false;
   }
   applyClaudeHeaders(http);
+  if (!prepareClaudeTlsRequest()) return false;
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
     claudeState = "Organisationssuche: " + claudeRequestError(code, http, client);
@@ -870,14 +882,14 @@ void fetchClaudeUsage() {
     claudeState = config.sessionKey.length() ? "WLAN getrennt" : "sessionKey fehlt";
     return;
   }
-  claudeState = "Aktualisiere ...";
+  claudeState = F("Aktualisiere ...");
   displayDirty = true;
   if (!config.orgId.length() && !discoverOrganization()) {
-    if (claudeState == "Aktualisiere ...") claudeState = "Keine Organisation gefunden";
+    if (claudeState == "Aktualisiere ...") claudeState = F("Keine Organisation gefunden");
     return;
   }
   if (config.orgId.length() != 36 || findOrganizationUuid(config.orgId.c_str(), config.orgId.length()) != 0) {
-    claudeState = "Ungültige Organisations-ID. UUID aus den PS1-Einstellungen übernehmen oder Feld für automatische Suche leeren.";
+    claudeState = F("Ungültige Organisations-ID. UUID aus den PS1-Einstellungen übernehmen oder Feld für automatische Suche leeren.");
     return;
   }
 
@@ -887,10 +899,11 @@ void fetchClaudeUsage() {
   HTTPClient http;
   const String url = String(CLAUDE_BASE) + "/" + config.orgId + "/usage";
   if (!http.begin(client, url)) {
-    claudeState = "HTTPS konnte nicht starten";
+    claudeState = F("HTTPS konnte nicht starten");
     return;
   }
   applyClaudeHeaders(http);
+  if (!prepareClaudeTlsRequest()) return;
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
     claudeState = "Limit-Abruf: " + claudeRequestError(code, http, client);
@@ -921,10 +934,10 @@ void fetchClaudeUsage() {
   readBucket(root, "seven_day_opus", opusLimit);
   readBucket(root, "seven_day_sonnet", sonnetLimit);
   if (!sessionLimit.valid && !weeklyLimit.valid) {
-    claudeState = "Antwort ohne bekannte Limits";
+    claudeState = F("Antwort ohne bekannte Limits");
     return;
   }
-  claudeState = "Verbunden";
+  claudeState = F("Verbunden");
   lastClaudeUpdate = String(millis() / 60000UL) + " min nach Start";
   displayDirty = true;
 }
@@ -1096,12 +1109,12 @@ void drawDisplay() {
                   weeklyLimit.valid ? limitColor(weeklyLimit.used) : TFT_WHITE,
                   DisplayLayout::WEEKLY, weekly, fullRedraw);
   const String trueConfText = !config.trueConf.enabled ? String() : "TC " +
-      (trueConfResult.valid ? String(trueConfResult.unread) : String("--"));
+      (trueConfResult.valid ? String(trueConfResult.unread) : String(F("--")));
   drawChangedText(trueConfText, TFT_WHITE, DisplayLayout::TRUECONF, trueConf, fullRedraw);
   // Schmale Zeile vollständig innerhalb des inneren Rings.
   const String networkText = WiFi.status() == WL_CONNECTED
       ? (config.showIp ? "IP " + WiFi.localIP().toString() : String())
-      : (wifiPortal ? String("AP 192.168.4.1") : String("WLAN"));
+      : (wifiPortal ? String(F("AP 192.168.4.1")) : String(F("WLAN")));
   drawChangedText(networkText, TFT_WHITE, DisplayLayout::NETWORK, network, fullRedraw);
   displayNeedsFullRedraw = false;
   displayDirty = false;
@@ -1181,7 +1194,7 @@ void handleWifiRecovery() {
     return;
   }
   if (fallbackDue && !wifiPortal) {
-    Serial.println("WLAN seit 60 Sekunden getrennt; Setup-AP startet");
+    Serial.println(F("WLAN seit 60 Sekunden getrennt; Setup-AP startet"));
     web.stop();
     MDNS.end();
     normalWebRunning = false;
@@ -1201,7 +1214,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.printf("Claude Display Firmware %s\n", FIRMWARE_VERSION);
-  Serial.println("GC9A01: CLK=D5 MOSI=D7 DC=D4 RST=D0 CS=GND; SPI=10 MHz");
+  Serial.println(F("GC9A01: CLK=D5 MOSI=D7 DC=D4 RST=D0 CS=GND; SPI=10 MHz"));
   pinMode(Pins::TOUCH, INPUT_PULLUP);
   // Sensor darf seine Einschaltkalibrierung beenden; Erkennung erfolgt im loop().
   LittleFS.begin();
@@ -1210,7 +1223,7 @@ void setup() {
   display.init();
   display.setRotation(0);
   // Sichtbarer Selbsttest vor WLAN und Claude: benötigt keine Netzwerkverbindung.
-  Serial.println("Display-Selbsttest: Rot, Gruen, Blau, Weiss");
+  Serial.println(F("Display-Selbsttest: Rot, Gruen, Blau, Weiss"));
   for (uint16_t color : {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE}) {
     display.fillScreen(color);
     delay(500);
@@ -1221,7 +1234,7 @@ void setup() {
   display.setTextFont(2);
   display.drawString("WLAN verbinden ...", 120, 120);
   drawDisplayName();
-  Serial.println("Display initialisiert; WLAN-Verbindung startet");
+  Serial.println(F("Display initialisiert; WLAN-Verbindung startet"));
 
   connectWifi();
   configTime(LOCAL_TIMEZONE, config.ntpServer.c_str());
