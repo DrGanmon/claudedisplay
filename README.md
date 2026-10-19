@@ -128,7 +128,7 @@ Falls ein TTP223 angeschlossen ist, wechselt eine kurze Berührung beim Loslasse
 
 ## Webseite
 
-Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.7`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
+Die aktuelle Firmware zeigt auf jeder Webseite die Version `2026-10-19.8`. Fehlen die neuen Buttons, zuerst die neu kompilierte `.pio/build/d1_mini/firmware.bin` unter `/update` installieren und danach `/settings` neu laden. Änderungen am Quellcode allein aktualisieren das Gerät nicht.
 
 Die normalen Webseiten zeigen außerdem Datum und aktuelle Geräteuhrzeit in `Europe/Berlin` einschließlich automatischer Sommer-/Winterzeit. Die Anzeige läuft im Browser sekündlich weiter und gleicht sich alle zehn Sekunden mit `/api/time` ab. Grundlage ist die NTP-synchronisierte ESP-Uhr, nicht die Uhr des PCs. Vor der Zeitsynchronisierung erscheint `Uhrzeit noch nicht synchronisiert`. Die laufende Anzeige benötigt JavaScript.
 
@@ -169,6 +169,8 @@ Der serielle Monitor protokolliert jetzt `Claude TLS: DRAM=..., Block=...; IRAM=
 Grundlagen: [BearSSL-Speicherbedarf](https://arduino-esp8266.readthedocs.io/en/3.0.0/esp8266wifi/bearssl-client-secure-class.html), [IRAM und zweiter Heap](https://arduino-esp8266.readthedocs.io/en/latest/mmu.html), [vergleichbarer SDK-Absturz in der Ratentabelle](https://github.com/espressif/ESP8266_NONOS_SDK/issues/320).
 
 ### Wetterseite einrichten
+
+Die Wetterseite verwendet ab `2026-10-19.8` eine warme Farbpalette mit cremefarbenen Werten, honigfarbenen Akzenten, einem dezenten runden Rahmen und ruhigen Animationen. Eine sanft leuchtende Sonne, schattierte Wolken und gedämpfte Blau-/Salbeitöne gestalten die Anzeige gemütlicher. Rahmen und Akzente werden nur beim vollständigen Seitenaufbau gezeichnet; der vorhandene kleine 8-Bit-Sprite bleibt unverändert groß.
 
 Unter `/settings` im Abschnitt **Wetter-Standort** Ortsname, Breitengrad und Längengrad eintragen (Dezimalpunkt, beispielsweise Berlin: `52.52`, `13.405`) und speichern. Die Koordinaten legen den tatsächlichen Abfrageort fest; der Ortsname ist die Displaybeschriftung. Der Standort bleibt nach einem Neustart erhalten. Alle drei Felder leeren deaktiviert den Abruf.
 
@@ -263,8 +265,8 @@ Downloads: [GitHub Actions](https://github.com/DrGanmon/claudedisplay/actions/wo
 Ein gepushter Versions-Tag mit Präfix `v` erstellt nach erfolgreichem Build und Tests automatisch ein [GitHub Release](https://github.com/DrGanmon/claudedisplay/releases) mit denselben Dateien als einzelne Downloads. Der Tag muss exakt zur Konstante `FIRMWARE_VERSION` in `src/main.cpp` passen. Beispiel für den aktuellen Stand, nachdem alle gewünschten Änderungen committed und gepusht wurden:
 
 ```sh
-git tag v2026-10-19.7
-git push origin v2026-10-19.7
+git tag v2026-10-19.8
+git push origin v2026-10-19.8
 ```
 
 Der Workflow verwendet das automatisch von GitHub bereitgestellte `GITHUB_TOKEN`. Ein persönlicher Token ist nicht erforderlich; nur der Release-Job erhält Schreibrechte auf Repository-Inhalte. GitHub Actions muss im Repository erlaubt sein. Normale Branch-Pushes und Pull Requests erzeugen Download-Artefakte, aber kein Release. Der Workflow wird auf GitHub erst aktiv, nachdem die neue Workflowdatei gepusht wurde. Lokal vorbereitet bedeutet noch keinen erfolgten GitHub-Build oder veröffentlichten Release.

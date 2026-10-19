@@ -51,7 +51,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-19.7";
+constexpr char FIRMWARE_VERSION[] = "2026-10-19.8";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -1076,22 +1076,33 @@ void drawChangedText(const String &text, uint16_t color, const DisplayLayout::Te
 void drawWeatherDisplay() {
   static TextDrawState title, location, temp, condition, humidity, wind, status, source;
   const bool full = displayNeedsFullRedraw;
-  if (full) display.fillScreen(TFT_BLACK);
+  if (full) {
+    display.fillScreen(TFT_BLACK);
+    display.drawCircle(120, 120, 117, WeatherTheme::FRAME);
+    display.drawCircle(120, 120, 115, WeatherTheme::FRAME);
+    // Small warm accents beside the icon, clear of all text surfaces.
+    for (int x : {62, 178}) {
+      display.fillCircle(x, 80, 2, WeatherTheme::HONEY);
+      display.drawFastHLine(x - 3, 70, 7, WeatherTheme::FRAME);
+      display.drawFastVLine(x, 67, 7, WeatherTheme::FRAME);
+    }
+    display.drawFastHLine(93, 159, 54, WeatherTheme::FRAME);
+  }
   weatherAnimation.draw(weather.valid ? weather.code : -1, millis(), full);
-  drawChangedText("Wetter", TFT_CYAN, DisplayLayout::WEATHER_TITLE, title, full);
-  drawChangedText(config.weatherName, TFT_WHITE, DisplayLayout::WEATHER_LOCATION, location, full);
+  drawChangedText("Draussen", WeatherTheme::HONEY, DisplayLayout::WEATHER_TITLE, title, full);
+  drawChangedText(config.weatherName, WeatherTheme::CREAM, DisplayLayout::WEATHER_LOCATION, location, full);
   drawChangedText(weather.valid ? String(weather.temperature, 1) + " C" : "--.- C",
-                  TFT_WHITE, DisplayLayout::WEATHER_TEMPERATURE, temp, full);
+                  WeatherTheme::CREAM, DisplayLayout::WEATHER_TEMPERATURE, temp, full);
   drawChangedText(weather.valid ? weatherDescription(weather.code) : "Keine Wetterdaten",
-                  TFT_WHITE, DisplayLayout::WEATHER_CONDITION, condition, full);
+                  WeatherTheme::MUTED, DisplayLayout::WEATHER_CONDITION, condition, full);
   drawChangedText(weather.valid ? "Feuchte " + String(weather.humidity, 0) + " %" : "",
-                  TFT_WHITE, DisplayLayout::WEATHER_HUMIDITY, humidity, full);
+                  WeatherTheme::SKY, DisplayLayout::WEATHER_HUMIDITY, humidity, full);
   drawChangedText(weather.valid ? "Wind " + String(weather.wind, 0) + " km/h" : "",
-                  TFT_WHITE, DisplayLayout::WEATHER_WIND, wind, full);
+                  WeatherTheme::SAGE, DisplayLayout::WEATHER_WIND, wind, full);
   const String state = !config.weatherName.length() ? "Standort in Einstellungen" :
       (WiFi.status() != WL_CONNECTED ? "WLAN getrennt" : weather.state);
-  drawChangedText(state, TFT_WHITE, DisplayLayout::WEATHER_STATUS, status, full);
-  drawChangedText("Open-Meteo", TFT_DARKGREY, DisplayLayout::WEATHER_SOURCE, source, full);
+  drawChangedText(state, WeatherTheme::MUTED, DisplayLayout::WEATHER_STATUS, status, full);
+  drawChangedText("Open-Meteo", WeatherTheme::MUTED, DisplayLayout::WEATHER_SOURCE, source, full);
   displayNeedsFullRedraw = false;
   displayDirty = false;
 }
