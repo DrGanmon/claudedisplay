@@ -22,6 +22,7 @@
 #include "text_strips.h"
 #include "reusable_text_buffer.h"
 #include "web_ui.h"
+#include "gif_player.h"
 #include "wifi_recovery.h"
 #include "wifi_pulse.h"
 #include "weather.h"
@@ -59,7 +60,7 @@ constexpr char SETUP_AP[] = "ClaudeDisplay-Setup";
 constexpr char SETUP_AP_PASSWORD[] = "claude-display";
 constexpr char DEFAULT_WEB_PASSWORD[] = "claude-display";
 constexpr char CLAUDE_BASE[] = "https://claude.ai/api/organizations";
-constexpr char FIRMWARE_VERSION[] = "2026-10-20.9";
+constexpr char FIRMWARE_VERSION[] = "2026-10-20.15";
 constexpr char LOCAL_TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 constexpr char FIREFOX_WINDOWS_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 constexpr char LEGACY_USER_AGENT[] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -135,6 +136,23 @@ uint32_t webServerReadyMs = 0;
 
 WeatherResult weather;
 DisplayPages pages;
+constexpr char GIF_PATH[] = "/display.gif";
+constexpr char GIF_TEMP[] = "/display.gif.tmp";
+GifPlayer gifPlayer(display);
+File gifUploadFile;
+bool gifUploadActive=false, gifUploadAuthorized=false, gifUploadOk=false;
+uint32_t gifUploadBytes=0;
+String gifUploadError;
+
+void updateGifAvailability() {
+  File file=LittleFS.open(GIF_PATH,"r");
+  bool valid=file && GifLimits::validate(file, yield);
+  file.close();
+  if(pages.setGifAvailable(valid)) {
+    gifPlayer.release(); displayNeedsFullRedraw=true;
+  }
+}
+
 bool forceWeatherRefresh = true;
 uint32_t lastWeatherMs = 0;
 
@@ -345,7 +363,7 @@ void handleStatus() {
   web.sendContent(F(" %</dd></div><div><dt>Luftdruck</dt><dd>"));
   sendLiveValue(F("pressure_hpa"), isnan(pressureHpa) ? String(F("--")) : String(pressureHpa, 1), "decimal");
   web.sendContent(F(" hPa</dd></div></dl></section><section class='card network'><div class='card-top'><h2>Dein Display</h2><span class='tag' id='displayPage'>"));
-  web.sendContent(pages.weather() ? "Wetter" : (pages.status() ? "Status" : "Claude"));
+  web.sendContent(pages.gif() ? "GIF" : (pages.weather() ? "Wetter" : (pages.status() ? "Status" : "Claude")));
   web.sendContent(F("</span></div><dl class='facts'><div><dt>WLAN</dt><dd>"));
   sendLiveValue(F("ssid"), WiFi.SSID());
   web.sendContent(F("</dd></div><div><dt>IP-Adresse</dt><dd>"));
@@ -454,6 +472,15 @@ void handleSettings() {
                     "<button type='submit'>Passwort ändern</button></form></div>"
                     "<div class='card'><p>Benutzername der Einstellungsseite: <b>admin</b></p>"
                     "<p>Falls ein TTP223 angeschlossen ist: mindestens 5 Sekunden berühren, um WLAN neu einzurichten.</p></div>"));
+  web.sendContent(F("<section class='card'><h2>Dein kleiner GIF-Moment</h2>"
+    "<p>Animierte GIFs bis 96 × 96 Pixel und 128 KiB. Ohne Skalierung, mittig im Cozy-Rahmen. "
+    "Die dritte Seite erscheint erst nach einem gültigen Upload. Wiederherstellung des vorherigen Bilds (Disposal 3) wird nicht unterstützt.</p>"));
+  if(LittleFS.exists(GIF_PATH)) web.sendContent(F("<figure class='gif-preview'><img src='/gif/image' width='96' height='96' alt='Deine gespeicherte Animation'></figure>"
+    "<form method='post' action='/gif/delete' data-reload='true'><button type='submit' class='secondary'>GIF löschen</button></form>"));
+  else web.sendContent(F("<p>Noch keine Animation gespeichert.</p>"));
+  web.sendContent(F("<form id='gifForm' data-reload='true' method='post' action='/gif/upload' enctype='multipart/form-data'>"
+    "<label>GIF auswählen<input type='file' name='gif' accept='.gif,image/gif' required></label>"
+    "<button type='submit'>GIF hochladen</button><p class='caption'>Eine vorhandene Animation wird erst nach erfolgreicher Prüfung ersetzt.</p></form></section>"));
   sendWeatherSettings();
   sendTrueConfSettings();
   endPage();
@@ -668,6 +695,7 @@ void handleUpdateUpload() {
     updateSuccessful = false;
     updateError = F("");
     if (!updateAuthenticated) return;
+    gifPlayer.release(); displayNeedsFullRedraw=true;
     if (!upload.filename.endsWith(".bin")) {
       updateError = F("Nur eine firmware.bin ist erlaubt.");
       return;
@@ -719,6 +747,71 @@ void handleUpdateFinished() {
   ESP.restart();
 }
 
+// Multipart chunks go directly to a temporary flash file; never buffer the GIF in RAM.
+void handleGifUpload() {
+  HTTPUpload &upload=web.upload();
+  if(upload.status==UPLOAD_FILE_START) {
+    if(gifUploadActive) { gifUploadError=F("Bitte nur eine GIF-Datei auswählen."); return; }
+    gifUploadAuthorized=web.authenticate("admin",config.webPassword.c_str());
+    gifUploadOk=false; gifUploadBytes=0; gifUploadError=String();
+    if(!gifUploadAuthorized) return;
+    gifUploadActive=true;
+    gifPlayer.release();
+    gifUploadFile=LittleFS.open(GIF_TEMP,"w");
+    if(!gifUploadFile) gifUploadError=F("Kein Flash-Speicher für den Upload verfügbar.");
+  } else if(upload.status==UPLOAD_FILE_WRITE) {
+    if(!gifUploadAuthorized || gifUploadError.length()) return;
+    if(upload.currentSize>GifLimits::BYTES-gifUploadBytes) {
+      gifUploadError=F("GIF zu groß: höchstens 128 KiB erlaubt."); return;
+    }
+    gifUploadBytes+=upload.currentSize;
+    if(gifUploadFile.write(upload.buf,upload.currentSize)!=upload.currentSize)
+      gifUploadError=F("GIF konnte nicht vollständig im Flash gespeichert werden.");
+  } else if(upload.status==UPLOAD_FILE_END) {
+    if(!gifUploadAuthorized) return;
+    gifUploadFile.flush();
+    if(gifUploadFile && gifUploadFile.getWriteError()) gifUploadError=F("Flash-Schreibfehler.");
+    gifUploadFile.close();
+    if(!gifUploadError.length()) {
+      File check=LittleFS.open(GIF_TEMP,"r");
+      bool valid=check && GifLimits::validate(check, yield);
+      check.close();
+      if(!valid) gifUploadError=F("GIF ungültig oder nicht unterstützt. Maximal 96 × 96 Pixel, vollständige GIF-Datei und Disposal 0, 1 oder 2 verwenden.");
+      else {
+        releaseDisplayScratch(); weatherAnimation.release();
+        gifUploadOk=gifPlayer.verify(GIF_TEMP);
+        if(!gifUploadOk) {
+          const int error=gifPlayer.lastError();
+          if(error==-1) gifUploadError=F("GIF-Prüfung: zu wenig Speicher für Decoder oder Wörterbuch.");
+          else if(error==-2) gifUploadError=F("GIF-Prüfung: maximal 4096 Frames oder 8 Sekunden Prüfzeit überschritten.");
+          else { gifUploadError=F("GIF-Dekodierfehler, Code "); gifUploadError+=String(error); }
+
+        }
+      }
+    }
+  } else if(upload.status==UPLOAD_FILE_ABORTED) {
+    gifUploadFile.close(); LittleFS.remove(GIF_TEMP); gifUploadActive=false;
+    gifUploadOk=false; gifUploadError=String();
+    if(pages.gif()) displayNeedsFullRedraw=true;
+  }
+  yield();
+}
+
+void handleGifFinished() {
+  if(!requireSettingsAuth()) return;
+  gifUploadFile.close();
+  if(gifUploadOk && !gifUploadError.length()) {
+    // LittleFS rename replaces the destination atomically, preserving the old GIF on failure.
+    if(!LittleFS.rename(GIF_TEMP,GIF_PATH)) gifUploadError=F("GIF konnte nicht übernommen werden.");
+  } else if(!gifUploadError.length()) gifUploadError=F("Keine vollständige GIF-Datei empfangen.");
+  LittleFS.remove(GIF_TEMP);
+  gifUploadActive=false; gifUploadOk=false;
+  updateGifAvailability();
+  if(pages.gif()) displayNeedsFullRedraw=true;
+  settingsResult(gifUploadError.length()?gifUploadError:String(F("GIF gespeichert. Die dritte Displayseite ist jetzt verfügbar.")));
+  gifUploadError=String();
+}
+
 void setupWebServer() {
   static bool routesRegistered = false;
   if (!routesRegistered) {
@@ -729,6 +822,22 @@ void setupWebServer() {
   web.on("/assets/cozy.js", HTTP_GET, []() {
     web.sendHeader("Cache-Control", "public, max-age=86400");
     web.send_P(200, PSTR("application/javascript; charset=utf-8"), WEB_JS);
+  });
+  web.on("/gif/upload", HTTP_POST, handleGifFinished, handleGifUpload);
+  web.on("/gif/image", HTTP_GET, []() {
+    if(!requireSettingsAuth()) return;
+    File file=LittleFS.open(GIF_PATH,"r");
+    web.sendHeader("Cache-Control","no-store");
+    if(!file) { web.send(404,"text/plain","Keine GIF vorhanden"); return; }
+    web.streamFile(file,"image/gif"); file.close();
+  });
+  web.on("/gif/delete", HTTP_POST, []() {
+    if(!requireSettingsAuth()) return;
+    gifPlayer.release();
+    bool ok=!LittleFS.exists(GIF_PATH)||LittleFS.remove(GIF_PATH);
+    updateGifAvailability();
+    displayNeedsFullRedraw=true;
+    settingsResult(ok?F("GIF gelöscht. Die dritte Displayseite ist ausgeblendet."):F("GIF konnte nicht gelöscht werden."));
   });
   web.on("/", HTTP_GET, handleStatus);
   web.on("/settings", HTTP_GET, handleSettings);
@@ -794,7 +903,7 @@ void setupWebServer() {
     doc["touch"]["raw_high"] = digitalRead(Pins::TOUCH) == HIGH;
     doc["touch"]["ready"] = touchInput.isArmed();
     doc["touch"]["pressed"] = touchInput.isPressed();
-    doc["display_page"] = pages.status() ? "status" : (pages.weather() ? "weather" : "claude");
+    doc["display_page"] = pages.gif() ? "gif" : pages.status() ? "status" : (pages.weather() ? "weather" : "claude");
     doc["free_heap"] = ESP.getFreeHeap();
     doc["max_free_block"] = ESP.getMaxFreeBlockSize();
     doc["heap_fragmentation"] = ESP.getHeapFragmentation();
@@ -891,9 +1000,6 @@ bool prepareClaudeTlsRequest() {
     iramFree = ESP.getFreeHeap();
     iramLargest = ESP.getMaxFreeBlockSize();
   }
-  Serial.printf("Claude TLS: DRAM=%lu, Block=%lu; IRAM=%lu, Block=%lu\n",
-                static_cast<unsigned long>(freeHeap), static_cast<unsigned long>(largestBlock),
-                static_cast<unsigned long>(iramFree), static_cast<unsigned long>(iramLargest));
   if (hasClaudeTlsMemory(freeHeap, largestBlock, iramFree, iramLargest)) return true;
   claudeState = F("Claude-Abruf ausgesetzt: zu wenig TLS-Speicher. Heap ");
   claudeState += String(freeHeap) + F(" Bytes, groesster Block ") + String(largestBlock) +
@@ -1311,9 +1417,29 @@ void drawWifiConnecting(bool force = false) {
   displayDirty = false;
 }
 
+void drawGifDisplay() {
+  bool full=activeTextCache.select(DisplayTextCache::Screen::GIF)||displayNeedsFullRedraw;
+  if(full) {
+    gifPlayer.release(); releaseDisplayScratch();
+    display.fillScreen(TFT_BLACK);
+    display.drawCircle(120,120,111,WeatherTheme::SAGE);
+    display.drawCircle(120,120,108,WeatherTheme::MUTED);
+    display.setTextDatum(MC_DATUM); display.setTextColor(WeatherTheme::CREAM,TFT_BLACK);
+    display.drawString("Dein kleiner Moment",120,37,2);
+    display.setTextColor(WeatherTheme::MUTED,TFT_BLACK);
+    display.drawString("Tap zum Weitergehen",120,201,2);
+    if(!gifUploadActive && !gifPlayer.start(GIF_PATH)) {
+      display.setTextColor(WeatherTheme::CREAM,TFT_BLACK);
+      display.drawString("GIF nicht abspielbar",120,120,2);
+    }
+  }
+  displayNeedsFullRedraw=false; displayDirty=false;
+}
+
 void drawDisplay() {
   if (WiFi.status() != WL_CONNECTED && !pages.status()) { drawWifiConnecting(); return; }
   if (pages.status()) { drawStatusDisplay(); return; }
+  if (pages.gif()) { drawGifDisplay(); return; }
   if (pages.weather()) { drawWeatherDisplay(); return; }
   const bool fullRedraw = activeTextCache.select(DisplayTextCache::Screen::CLAUDE) || displayNeedsFullRedraw;
   TextDrawState &name = activeTextCache[0];
@@ -1376,23 +1502,16 @@ void drawDisplay() {
 }
 
 void handleTouch() {
-  static bool wasArmed = false, wasPressed = false;
   const bool rawPressed = digitalRead(Pins::TOUCH) == HIGH;
   const TouchInput::Event event = touchInput.update(rawPressed, millis());
-  if (touchInput.isArmed() && !wasArmed) Serial.println(F("Touch: LOW erkannt, Sensor bereit"));
-  if (touchInput.isPressed() != wasPressed)
-    Serial.println(touchInput.isPressed() ? F("Touch: gedrueckt (HIGH)") : F("Touch: losgelassen (LOW)"));
-  wasArmed = touchInput.isArmed();
-  wasPressed = touchInput.isPressed();
   if (pages.update(event, rawPressed || touchInput.isPressed(), millis())) {
     if (pages.requestsPaused()) {
       sessionRing.startup.pause();
       weeklyRing.startup.pause();
     }
     if (!pages.weather()) weatherAnimation.release();
+    if (!pages.gif()) gifPlayer.release();
     displayNeedsFullRedraw = true;
-    Serial.println(pages.status() ? F("Touch: Statusseite") :
-                   (pages.weather() ? F("Touch: Wetterseite") : F("Touch: Claude-Seite")));
     drawDisplay();
   }
   if (event == TouchInput::Event::LONG_PRESS) touchResetRequested = true;
@@ -1431,6 +1550,7 @@ void connectWifi(bool trySavedWifi = true) {
   wifiStartup.finish();
   wifiPortal.reset(new WiFiManager());
   WiFiManager &manager = *wifiPortal;
+  manager.setDebugOutput(false);
   manager.setHostname(HOSTNAME);
   manager.setConfigPortalTimeout(0);
   manager.setConfigPortalBlocking(false);
@@ -1477,7 +1597,6 @@ void handleWifiRecovery() {
     return;
   }
   if (!wifiPortal && (wifiStartup.needsPortal(now) || (!wifiStartup.active() && fallbackDue))) {
-    Serial.println(F("WLAN nicht erreichbar; Setup-AP startet"));
     web.stop();
     MDNS.end();
     normalWebRunning = false;
@@ -1495,11 +1614,11 @@ void handleWifiRecovery() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println();
-  Serial.printf("Claude Display Firmware %s\n", FIRMWARE_VERSION);
-  Serial.println(F("GC9A01: CLK=D5 MOSI=D7 DC=D4 RST=D0 CS=GND; SPI=10 MHz"));
+  Serial.setDebugOutput(false);
   LittleFS.begin();
   loadConfig();
+  LittleFS.remove(GIF_TEMP);
+  updateGifAvailability();
 
   display.init();
   display.setRotation(0);
@@ -1507,9 +1626,7 @@ void setup() {
   // Erst NACH display.init() den Pinmux wieder als Touch-GPIO konfigurieren.
   // GC9A01 ist hier nur schreibend angeschlossen (kein MISO).
   pinMode(Pins::TOUCH, INPUT_PULLUP);
-  Serial.println(F("Touch: D6/GPIO12 nach Displaystart als Eingang eingerichtet"));
   drawWifiConnecting(true);
-  Serial.println(F("Display initialisiert; WLAN-Verbindung startet"));
 
   connectWifi();
   configTime(LOCAL_TIMEZONE, config.ntpServer.c_str());
@@ -1524,6 +1641,7 @@ void setup() {
 
 void loop() {
   const uint32_t now = millis();
+  if(WiFi.status()!=WL_CONNECTED) gifPlayer.release();
   handleWifiRecovery();
   if (normalWebRunning) {
     web.handleClient();
@@ -1551,7 +1669,7 @@ void loop() {
       (millis() - webServerReadyMs >= Timing::TRUECONF_STARTUP_GRACE_MS &&
        millis() - lastTrueConfMs >= config.trueConf.intervalSec * 1000UL))) refreshTrueConf();
 
-  if (!claudeStartupActive() && !pages.status() && !pages.tapPending() && !touchInput.isPressed() &&
+  if (!claudeStartupActive() && !pages.status() && !pages.gif() && !pages.tapPending() && !touchInput.isPressed() &&
       WiFi.status() == WL_CONNECTED && config.weatherName.length() &&
       (forceWeatherRefresh || millis() - lastWeatherMs >= 900000UL)) {
     forceWeatherRefresh = false;
@@ -1570,6 +1688,15 @@ void loop() {
   if (!updateAuthenticated) {
     if (WiFi.status() != WL_CONNECTED) {
       if (!pages.status()) drawWifiConnecting();
+    }
+    else if (pages.gif()) {
+      if(!gifUploadActive) {
+        gifPlayer.tick(millis());
+        if(gifPlayer.error()) {
+          display.setTextDatum(MC_DATUM); display.setTextColor(WeatherTheme::CREAM,TFT_BLACK);
+          display.drawString("GIF nicht abspielbar",120,120,2);
+        }
+      }
     }
     else if (pages.weather()) weatherAnimation.draw(weather.valid ? weather.code : -1, millis());
     else if (!pages.status()) drawClaudeRings();

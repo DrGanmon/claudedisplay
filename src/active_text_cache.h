@@ -8,7 +8,7 @@
 template <typename State, size_t Count>
 class ActiveTextCache {
  public:
-  enum class Screen : uint8_t { NONE, CLAUDE, WEATHER, STATUS, WIFI };
+  enum class Screen : uint8_t { NONE, CLAUDE, WEATHER, STATUS, WIFI, GIF };
   bool select(Screen screen) {
     if (screen == current) return false;
     for (auto &slot : slots) {

@@ -26,10 +26,12 @@ else:
     <span data-live="weather.location"></span><span data-live="free_heap" data-format="kib"></span>
     <span id="weatherSymbol"></span><span id="displayPage"></span></main>
     <form action="http://device/settings" method="post"><label>Secret<input name="secret" type="password"></label><button type="submit">Speichern</button></form>
+    <form id="gifForm" action="http://device/gif/upload" method="post" enctype="multipart/form-data"><input type="file" name="gif"><button type="submit">GIF hochladen</button></form>
     <div id="toast" hidden></div>
     <script>
-    let posted=false;
+    let posted=false,gifPosted=false;
     window.fetch=async(url,options={})=>{
+      if(options.method==='POST' && String(url)==='/gif/upload'){gifPosted=options.body instanceof FormData && options.body.get('gif').name==='demo.gif';return new Response('<p role="status">GIF gespeichert.</p>');}
       if(options.method==='POST'){posted=String(options.body)==='secret=demo';return new Response('<p role="status">Gespeichert &lt;ok&gt;</p>');}
       if(String(url).includes('/api/time'))return new Response(JSON.stringify({clock_synced:true,unix_time:1792500000}));
       return new Response(JSON.stringify({five_hour:{remaining:84},seven_day:{remaining:50},claude_state:'Verbunden',free_heap:32768,weather:{location:'<img src=x onerror=alert(1)>',code:0},display_page:'weather'}));
@@ -42,9 +44,15 @@ else:
       document.querySelector('form').requestSubmit();
     },1200);
     setTimeout(()=>{
+      const transfer=new DataTransfer();transfer.items.add(new File(['GIF89a'],'demo.gif',{type:'image/gif'}));
+      document.querySelector('#gifForm input').files=transfer.files;
+      document.querySelector('#gifForm').requestSubmit();
+    },1600);
+    setTimeout(()=>{
       const checks=[
         document.documentElement.dataset.theme==='light',
-        document.querySelector('input').type==='text',posted,
+        document.querySelector('input').type==='text',posted,gifPosted,
+        document.querySelector('#gifForm .form-result').textContent==='GIF gespeichert.',
         document.querySelector('.form-result').textContent==='Gespeichert <ok>',
         document.querySelector('[data-live="weather.location"]').textContent==='<img src=x onerror=alert(1)>',
         !document.querySelector('img'),
@@ -65,4 +73,4 @@ else:
                                  '--virtual-time-budget=3500', '--dump-dom', html.as_uri()],
                                 capture_output=True, text=True, timeout=40, check=True)
         assert 'data-test="passed"' in result.stdout, result.stdout[-6000:]
-    print('Web UI: live values, gauges, theme, password toggle, form feedback and escaping OK')
+    print('Web UI: live values, gauges, theme, password toggle, form feedback, GIF multipart upload and escaping OK')

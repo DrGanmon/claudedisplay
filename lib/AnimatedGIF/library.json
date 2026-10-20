@@ -1,0 +1,7 @@
+{
+  "name": "AnimatedGIF",
+  "version": "2.2.0-split.1",
+  "description": "Project-local AnimatedGIF 2.2.0 with an externally owned 8 KiB LZW dictionary",
+  "frameworks": "arduino",
+  "platforms": "espressif8266"
+}

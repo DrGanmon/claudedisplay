@@ -45,4 +45,30 @@ int main() {
   assert(!wrap.update(E::NONE, false, 200));
   assert(wrap.update(E::NONE, false, 250));
   assert(wrap.weather());
+
+  // The third page exists only while a GIF is available.
+  DisplayPages gif;
+  gif.setGifAvailable(true);
+  gif.update(E::SHORT_PRESS,false,0); gif.update(E::NONE,false,350);
+  assert(gif.weather());
+  gif.update(E::SHORT_PRESS,false,400); gif.update(E::NONE,false,750);
+  assert(gif.gif() && gif.requestsPaused());
+  gif.update(E::SHORT_PRESS,false,800); gif.update(E::SHORT_PRESS,false,1000);
+  assert(gif.status());
+  gif.update(E::SHORT_PRESS,false,1100); assert(gif.gif());
+  gif.update(E::SHORT_PRESS,false,1200); gif.update(E::NONE,false,1550);
+  assert(gif.current()==P::CLAUDE);
+  gif.update(E::SHORT_PRESS,false,1600); gif.update(E::NONE,false,1950);
+  gif.update(E::SHORT_PRESS,false,2000); gif.update(E::NONE,false,2350);
+  assert(gif.gif());
+  assert(gif.setGifAvailable(false));
+  assert(gif.current()==P::CLAUDE && !gif.requestsPaused());
+  gif.setGifAvailable(true);
+  gif.update(E::SHORT_PRESS,false,2400); gif.update(E::NONE,false,2750);
+  gif.update(E::SHORT_PRESS,false,2800); gif.update(E::NONE,false,3150);
+  gif.update(E::SHORT_PRESS,false,3200); gif.update(E::SHORT_PRESS,false,3400);
+  assert(gif.status());
+  assert(!gif.setGifAvailable(false));
+  gif.update(E::SHORT_PRESS,false,3500);
+  assert(gif.current()==P::CLAUDE);
 }
